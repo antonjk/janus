@@ -1,7 +1,7 @@
-#!/usr/bin/env whisper-run
+#!/usr/bin/env janus-run
 # DESIGN.md s4 worked example.
 #
-# Run with the engine:   ./nested-async.sh         (shebang -> whisper-run)
+# Run with the engine:   ./nested-async.sh         (shebang -> janus-run)
 # Debug sequentially:    change shebang to #!/usr/bin/env bash
 
 #@ group async: outer

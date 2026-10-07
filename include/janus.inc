@@ -1,15 +1,15 @@
-[[ -n "${_WHISPER_INC_SOURCED:-}" ]] && return
-_WHISPER_INC_SOURCED=1
+[[ -n "${_JANUS_INC_SOURCED:-}" ]] && return
+_JANUS_INC_SOURCED=1
 
 ########################################################################################################################
-# Whisper runtime
+# Janus runtime
 #
 # Registry API (used by transpiled scripts):
-#   whisper-group [--async[=N]] "<header>"   open a group (branch)
-#   whisper-group-end                        close the current group
-#   whisper-step  [--id X] [--depends a,b] "<header>" <<DELIM ... DELIM
+#   janus-group [--async[=N]] "<header>"   open a group (branch)
+#   janus-group-end                        close the current group
+#   janus-step  [--id X] [--depends a,b] "<header>" <<DELIM ... DELIM
 #                                            register a leaf; body read from stdin (NOT executed yet)
-#   whisper-exec                             run the registered tree
+#   janus-exec                             run the registered tree
 #
 # Model (see DESIGN.md s4): a group runs children in registration order; a maximal run
 # of adjacent steps forms one concurrent batch (bounded by async=N; sync => size 1); a
@@ -31,31 +31,31 @@ _WHISPER_INC_SOURCED=1
 # Spool dir + registry state
 # ---------------------------------------------------------------------------------------------------------------------
 
-_whisper_spool() {
-   # Per-PID spool dir for the whisper tree. Created on first use.
+_janus_spool() {
+   # Per-PID spool dir for the janus tree. Created on first use.
    local base
    if declare -f temp_dir >/dev/null 2>&1; then
       base="$(temp_dir)"
    else
       base="/tmp/PID-$$"
    fi
-   printf '%s/whisper' "${base}"
+   printf '%s/janus' "${base}"
 }
 
-_whisper_init() {
-   local spool; spool="$(_whisper_spool)"
+_janus_init() {
+   local spool; spool="$(_janus_spool)"
    [[ -d "${spool}" ]] && return 0
    mkdir -p "${spool}" || return 1
    : >"${spool}/tree"
-   _WHISPER_DEPTH=0
-   _WHISPER_UID=0
+   _JANUS_DEPTH=0
+   _JANUS_UID=0
    # Clean up spooled children on interrupt if trap.inc is available.
    if declare -f trap_add >/dev/null 2>&1; then
-      trap_add '_whisper_cleanup' EXIT INT TERM
+      trap_add '_janus_cleanup' EXIT INT TERM
    fi
 }
 
-_whisper_cleanup() {
+_janus_cleanup() {
    # Best-effort: kill any still-running step children.
    if declare -f kill_descendant_processes >/dev/null 2>&1; then
       kill_descendant_processes "$$" false 2>/dev/null
@@ -64,8 +64,8 @@ _whisper_cleanup() {
 
 # tree record format (one line): TYPE|depth|id|meta|header
 #   TYPE in GROUP | GROUP_END | STEP
-_whisper_record() {
-   local spool; spool="$(_whisper_spool)"
+_janus_record() {
+   local spool; spool="$(_janus_spool)"
    printf '%s\n' "$1" >>"${spool}/tree"
 }
 
@@ -73,8 +73,8 @@ _whisper_record() {
 # Registry API
 # ---------------------------------------------------------------------------------------------------------------------
 
-whisper-group() {
-   _whisper_init
+janus-group() {
+   _janus_init
    local async="" header=""
    while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -86,23 +86,23 @@ whisper-group() {
       esac
    done
    header="$1"
-   local id="g$(( ++_WHISPER_UID ))"
+   local id="g$(( ++_JANUS_UID ))"
    local meta="async=${async}"
-   _whisper_record "GROUP|${_WHISPER_DEPTH}|${id}|${meta}|${header}"
-   _WHISPER_DEPTH=$(( _WHISPER_DEPTH + 1 ))
+   _janus_record "GROUP|${_JANUS_DEPTH}|${id}|${meta}|${header}"
+   _JANUS_DEPTH=$(( _JANUS_DEPTH + 1 ))
 }
 
-whisper-group-end() {
-   _whisper_init
-   # A group opened at level D raised _WHISPER_DEPTH to D+1. Record the GROUP_END at
+janus-group-end() {
+   _janus_init
+   # A group opened at level D raised _JANUS_DEPTH to D+1. Record the GROUP_END at
    # the group's OWN level D (so the walker can match it against the opening GROUP),
    # then drop back to D.
-   (( _WHISPER_DEPTH > 0 )) && _WHISPER_DEPTH=$(( _WHISPER_DEPTH - 1 ))
-   _whisper_record "GROUP_END|${_WHISPER_DEPTH}|||"
+   (( _JANUS_DEPTH > 0 )) && _JANUS_DEPTH=$(( _JANUS_DEPTH - 1 ))
+   _janus_record "GROUP_END|${_JANUS_DEPTH}|||"
 }
 
-whisper-step() {
-   _whisper_init
+janus-step() {
+   _janus_init
    local id="" depends="" header=""
    local succ="" fail="" ok="" err=""
    while [[ $# -gt 0 ]]; do
@@ -125,20 +125,20 @@ whisper-step() {
       esac
    done
    header="$1"
-   local uid="s$(( ++_WHISPER_UID ))"
+   local uid="s$(( ++_JANUS_UID ))"
    [[ -z "${id}" ]] && id="${uid}"
-   local spool; spool="$(_whisper_spool)"
+   local spool; spool="$(_janus_spool)"
    # Capture the body (heredoc on stdin). Expansion already happened at registration
    # because the transpiler uses an UNQUOTED heredoc delimiter.
    cat >"${spool}/step.${uid}.body"
    # Meta is a ';'-separated kv list; empty values mean "use the global default".
    local meta="depends=${depends};success=${succ};fail=${fail};ok=${ok};err=${err}"
-   _whisper_record "STEP|${_WHISPER_DEPTH}|${uid}|${meta}|${header}"
+   _janus_record "STEP|${_JANUS_DEPTH}|${uid}|${meta}|${header}"
 }
 
 # Extract a value for KEY from a ';'-separated kv meta string. Echoes the value
 # (possibly empty).
-_whisper_meta_get() {
+_janus_meta_get() {
    local meta="$1" key="$2" kv
    local IFS=';'
    for kv in ${meta}; do
@@ -148,17 +148,17 @@ _whisper_meta_get() {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Engine (whisper-exec)
+# Engine (janus-exec)
 # ---------------------------------------------------------------------------------------------------------------------
 
 # Parse the flat tree into parallel arrays, then walk it.
-whisper-exec() {
+janus-exec() {
    # The engine uses arithmetic (( )) and poll loops that are not `set -e` safe.
    # Neutralise the caller's errexit for the duration of execution.
-   local __whisper_errexit=0; [[ $- == *e* ]] && __whisper_errexit=1
+   local __janus_errexit=0; [[ $- == *e* ]] && __janus_errexit=1
    set +e
-   local spool; spool="$(_whisper_spool)"
-   [[ -r "${spool}/tree" ]] || { ceprintf "<fg:red>whisper: no registered steps</fg>\n"; (( __whisper_errexit )) && set -e; return 1; }
+   local spool; spool="$(_janus_spool)"
+   [[ -r "${spool}/tree" ]] || { ceprintf "<fg:red>janus: no registered steps</fg>\n"; (( __janus_errexit )) && set -e; return 1; }
 
    # Load records into arrays.
    _WT_TYPE=(); _WT_DEPTH=(); _WT_ID=(); _WT_META=(); _WT_HEADER=()
@@ -177,7 +177,7 @@ whisper-exec() {
 
    # Global header-field width: the widest STEP "indent + header" across the whole
    # run, so every spinner/status box aligns on the same column (character count,
-   # matching the original whisper-exec.sh WIDTH).
+   # matching the original janus-exec.sh WIDTH).
    #
    # Global status-field width: the widest effective status word (per-step ok/err
    # override, else the global default) across all steps, so every status box is the
@@ -187,13 +187,13 @@ whisper-exec() {
    local _k
    for (( _k=0; _k<n; _k++ )); do
       [[ "${_WT_TYPE[$_k]}" == "STEP" ]] || continue
-      local _indent_w=$(( ( ${_WT_DEPTH[$_k]} + 1 ) * WHISPER_INDENT ))
+      local _indent_w=$(( ( ${_WT_DEPTH[$_k]} + 1 ) * JANUS_INDENT ))
       local _w=$(( _indent_w + ${#_WT_HEADER[$_k]} ))
       (( _w > _WT_MAXHDR )) && _WT_MAXHDR=${_w}
       # Effective status words for this step.
       local _ok _err
-      _ok="$(_whisper_meta_get "${_WT_META[$_k]}" ok)";  [[ -z "${_ok}" ]]  && _ok="${WHISPER_OK_TEXT}"
-      _err="$(_whisper_meta_get "${_WT_META[$_k]}" err)"; [[ -z "${_err}" ]] && _err="${WHISPER_ERR_TEXT}"
+      _ok="$(_janus_meta_get "${_WT_META[$_k]}" ok)";  [[ -z "${_ok}" ]]  && _ok="${JANUS_OK_TEXT}"
+      _err="$(_janus_meta_get "${_WT_META[$_k]}" err)"; [[ -z "${_err}" ]] && _err="${JANUS_ERR_TEXT}"
       (( ${#_ok}  > _WT_STATUS_W )) && _WT_STATUS_W=${#_ok}
       (( ${#_err} > _WT_STATUS_W )) && _WT_STATUS_W=${#_err}
    done
@@ -201,19 +201,19 @@ whisper-exec() {
 
    local overall=0
    # Walk the top level (depth 0 nodes), recursing into groups.
-   # _WT_CURSOR is a global index advanced by _whisper_walk_node (avoids nameref
+   # _WT_CURSOR is a global index advanced by _janus_walk_node (avoids nameref
    # scoping collisions with the recursion).
    _WT_CURSOR=0
    while (( _WT_CURSOR < n )); do
-      _whisper_walk_node 0 || overall=1
+      _janus_walk_node 0 || overall=1
    done
-   (( __whisper_errexit )) && set -e
+   (( __janus_errexit )) && set -e
    return ${overall}
 }
 
 # Walk a single node at index (by nameref via eval on $1), at the given depth.
 # Advances the caller's index. Returns nonzero if any contained step failed.
-_whisper_walk_node() {
+_janus_walk_node() {
    local depth="$1"
    local n=${#_WT_TYPE[@]}
    local rc=0
@@ -223,7 +223,10 @@ _whisper_walk_node() {
          local header="${_WT_HEADER[$_WT_CURSOR]}"
          local meta="${_WT_META[$_WT_CURSOR]}"  # async=<unbounded|N|>
          local async="${meta#async=}"
-         _whisper_print_group "${header}" "${depth}"
+         if (( _WT_CURSOR > 0 )); then
+           printf '\n'
+         fi
+         _janus_print_group "${header}" "${depth}"
          _WT_CURSOR=$(( _WT_CURSOR + 1 ))
          # Process children until the matching GROUP_END at this depth.
          local batch=()                         # indices of adjacent STEP children
@@ -239,9 +242,9 @@ _whisper_walk_node() {
                   ;;
                GROUP)
                   # Barrier: flush the pending step batch first.
-                  if (( ${#batch[@]} )); then _whisper_run_batch "${depth}" "${async}" "${batch[@]}" || rc=1; fi
+                  if (( ${#batch[@]} )); then _janus_run_batch "${depth}" "${async}" "${batch[@]}" || rc=1; fi
                   batch=()
-                  _whisper_walk_node $(( depth + 1 )) || rc=1
+                  _janus_walk_node $(( depth + 1 )) || rc=1
                   ;;
                *)
                   _WT_CURSOR=$(( _WT_CURSOR + 1 ))
@@ -249,11 +252,11 @@ _whisper_walk_node() {
             esac
          done
          # Flush any trailing steps.
-         if (( ${#batch[@]} )); then _whisper_run_batch "${depth}" "${async}" "${batch[@]}" || rc=1; fi
+         if (( ${#batch[@]} )); then _janus_run_batch "${depth}" "${async}" "${batch[@]}" || rc=1; fi
          ;;
       STEP)
          # A bare top-level step (not inside a group): run it alone, sequentially.
-         _whisper_run_batch "${depth}" "" "$_WT_CURSOR" || rc=1
+         _janus_run_batch "${depth}" "" "$_WT_CURSOR" || rc=1
          _WT_CURSOR=$(( _WT_CURSOR + 1 ))
          ;;
       *)
@@ -274,7 +277,7 @@ _whisper_walk_node() {
 # if it is still running we animate a single in-place spinner until it exits; if it
 # already finished we emit its result immediately. The launch window is topped up as
 # steps complete, so later steps keep making progress while we display earlier ones.
-_whisper_run_batch() {
+_janus_run_batch() {
    local depth="$1"; shift
    local async="$1"; shift
    local -a steps=("$@")
@@ -290,7 +293,7 @@ _whisper_run_batch() {
       (( cap < 1 )) && cap=1
    fi
 
-   local spool; spool="$(_whisper_spool)"
+   local spool; spool="$(_janus_spool)"
    local rc=0
    local total=${#steps[@]}
 
@@ -301,7 +304,7 @@ _whisper_run_batch() {
    local launched=0   # how many positions have been started
 
    # Launch up to `cap` steps starting at batch position `from`.
-   _whisper_launch_window() {
+   _janus_launch_window() {
       while (( launched < total )); do
          # Count currently-running launched-but-unreaped steps.
          local running=0 j
@@ -319,14 +322,14 @@ _whisper_run_batch() {
       done
    }
 
-   _whisper_launch_window
+   _janus_launch_window
 
    # Walk the batch in order, displaying one step at a time.
    local pos
    for (( pos=0; pos<total; pos++ )); do
       # Make sure this position has been launched (cap may have deferred it).
       while [[ -z "${step_pid[$pos]}" ]]; do
-         _whisper_launch_window
+         _janus_launch_window
          [[ -z "${step_pid[$pos]}" ]] && sleep 0.05
       done
 
@@ -338,27 +341,27 @@ _whisper_run_batch() {
 
       if [[ -t 1 ]]; then
          # TTY: the spinner owns the task line (header + animated spinner on ONE line).
-         _whisper_spin_on_line "${pid}" "${depth}" "${header}"
+         _janus_spin_on_line "${pid}" "${depth}" "${header}"
       else
          # Non-TTY: emit a start line, then wait with no animation.
-         _whisper_print_step_start "${header}" "${depth}"
-         _whisper_wait_with_spinner "${pid}" "${depth}"
+         _janus_print_step_start "${header}" "${depth}"
+         _janus_wait_with_spinner "${pid}" "${depth}"
       fi
       wait "${pid}"; local st=$?
       (( st != 0 )) && rc=1
-      _whisper_print_step_done "${header}" "${st}" "${out}" "${depth}" "${idx}"
+      _janus_print_step_done "${header}" "${st}" "${out}" "${depth}" "${idx}"
    done
 
-   unset -f _whisper_launch_window 2>/dev/null
+   unset -f _janus_launch_window 2>/dev/null
    return ${rc}
 }
 
 # Non-TTY waiter: no animation, just block until the PID exits, topping up the
 # launch window each tick so other steps keep running.
-_whisper_wait_with_spinner() {
+_janus_wait_with_spinner() {
    local pid="$1" depth="$2"
    while kill -0 "${pid}" 2>/dev/null; do
-      declare -f _whisper_launch_window >/dev/null 2>&1 && _whisper_launch_window
+      declare -f _janus_launch_window >/dev/null 2>&1 && _janus_launch_window
       sleep 0.1
    done
    return 0
@@ -369,21 +372,21 @@ _whisper_wait_with_spinner() {
 # redrawing in place (carriage return) each tick until the PID exits, then clears
 # the line so the final result line (printed by the caller) replaces it.
 #
-# Padding matches the original whisper-exec.sh: the spinner occupies a fixed visible
-# area of WHISPER_SPINNER_AREA columns. Because printf field widths count BYTES (not
+# Padding matches the original janus-exec.sh: the spinner occupies a fixed visible
+# area of JANUS_SPINNER_AREA columns. Because printf field widths count BYTES (not
 # display columns), a multibyte glyph set needs a widened byte field:
 #     SPINNER_WIDTH = (AREA - take) + (take * bytes_per_glyph)
-: "${WHISPER_SPINNER_AREA:=5}"
+: "${JANUS_SPINNER_AREA:=5}"
 
-_whisper_spin_on_line() {
+_janus_spin_on_line() {
    local pid="$1" depth="$2" header="$3"
-   local pad; pad="$(_whisper_indent $(( depth + 1 )))"
+   local pad; pad="$(_janus_indent $(( depth + 1 )))"
 
    # Resolve glyphs/take/bytes from spinner.inc; else a simple ASCII set.
    local glyphs take bytes
    if declare -f spinopts >/dev/null 2>&1; then
       local opts
-      eval "opts=$(spinopts "${WHISPER_SPINNER:-wave-bars}" "(%c %t %i %b)")"
+      eval "opts=$(spinopts "${JANUS_SPINNER:-wave-bars}" "(%c %t %i %b)")"
       glyphs="${opts[0]}"; take="${opts[1]:-1}"; bytes="${opts[3]:-1}"
    else
       glyphs='|/-\'; take=1; bytes=1
@@ -391,8 +394,8 @@ _whisper_spin_on_line() {
    local nglyph=${#glyphs}
    (( nglyph < 1 )) && { glyphs='*'; nglyph=1; take=1; bytes=1; }
 
-   # Byte-aware field width so the spinner box stays WHISPER_SPINNER_AREA columns wide.
-   local area="${WHISPER_SPINNER_AREA}"
+   # Byte-aware field width so the spinner box stays JANUS_SPINNER_AREA columns wide.
+   local area="${JANUS_SPINNER_AREA}"
    local spin_w=$(( (area - take) + (take * bytes) ))
    (( spin_w < 1 )) && spin_w=1
 
@@ -406,7 +409,7 @@ _whisper_spin_on_line() {
    tput civis 2>/dev/null
    local i=0
    while kill -0 "${pid}" 2>/dev/null; do
-      declare -f _whisper_launch_window >/dev/null 2>&1 && _whisper_launch_window
+      declare -f _janus_launch_window >/dev/null 2>&1 && _janus_launch_window
       local frame="${work:$(( i % nglyph )):${take}}"
       # Redraw the whole line: padded header then spinner (left-justified in spin_w bytes).
       cprintf "\r%s<fg:white>%-${hdr_w}s</fg>  [ <fg:blue>%-${spin_w}b</fg> ]" "${pad}" "${header}" "${frame}"
@@ -423,51 +426,51 @@ _whisper_spin_on_line() {
 # ---------------------------------------------------------------------------------------------------------------------
 # Presentation (overridable). Context line counts can be tuned via env.
 # ---------------------------------------------------------------------------------------------------------------------
-: "${WHISPER_CONTEXT_SUCCESS:=2}"
-: "${WHISPER_CONTEXT_FAIL:=25}"
-: "${WHISPER_INDENT:=2}"       # spaces per nesting level
-: "${WHISPER_OK_TEXT:=OK}"     # default success status word
-: "${WHISPER_ERR_TEXT:=ERR}"   # default failure status word
+: "${JANUS_CONTEXT_SUCCESS:=0}"
+: "${JANUS_CONTEXT_FAIL:=25}"
+: "${JANUS_INDENT:=2}"       # spaces per nesting level
+: "${JANUS_OK_TEXT:=OK}"     # default success status word
+: "${JANUS_ERR_TEXT:=ERR}"   # default failure status word
 
-# Emit `depth * WHISPER_INDENT` spaces.
-_whisper_indent() {
-   local depth="${1:-0}" width=$(( ${1:-0} * WHISPER_INDENT ))
+# Emit `depth * JANUS_INDENT` spaces.
+_janus_indent() {
+   local depth="${1:-0}" width=$(( ${1:-0} * JANUS_INDENT ))
    (( width > 0 )) && printf '%*s' "${width}" ''
 }
 
-_whisper_print_group() {
+_janus_print_group() {
    # $1 = header, $2 = depth
-   local pad; pad="$(_whisper_indent "${2:-0}")"
+   local pad; pad="$(_janus_indent "${2:-0}")"
    cprintf "%s<fg:yellow+><b>%s</b></fg>\n" "${pad}" "$1"
 }
 
-_whisper_print_step_start() {
+_janus_print_step_start() {
    # $1 = header, $2 = depth (of the containing group); steps sit one level deeper
-   local pad; pad="$(_whisper_indent $(( ${2:-0} + 1 )))"
+   local pad; pad="$(_janus_indent $(( ${2:-0} + 1 )))"
    cprintf "%s<fg:blue>%s</fg>\n" "${pad}" "$1"
 }
 
-_whisper_print_step_done() {
+_janus_print_step_done() {
    # $1=header $2=status $3=out $4=depth $5=step index (into _WT_* for meta lookup)
    # Layout mirrors the spinner line: "<header>  [ STATUS ]" so the TTY transition
    # from spinner to result stays in place.
    local header="$1" status="$2" out="$3" depth="${4:-0}" idx="${5:-}"
-   local pad; pad="$(_whisper_indent $(( depth + 1 )))"
-   local opad; opad="$(_whisper_indent $(( depth + 2 )))"
+   local pad; pad="$(_janus_indent $(( depth + 1 )))"
+   local opad; opad="$(_janus_indent $(( depth + 2 )))"
 
    # Per-step overrides (fall back to globals when unset).
    local meta="" o_succ="" o_fail="" o_ok="" o_err=""
    if [[ -n "${idx}" ]]; then
       meta="${_WT_META[$idx]}"
-      o_succ="$(_whisper_meta_get "${meta}" success)"
-      o_fail="$(_whisper_meta_get "${meta}" fail)"
-      o_ok="$(_whisper_meta_get "${meta}" ok)"
-      o_err="$(_whisper_meta_get "${meta}" err)"
+      o_succ="$(_janus_meta_get "${meta}" success)"
+      o_fail="$(_janus_meta_get "${meta}" fail)"
+      o_ok="$(_janus_meta_get "${meta}" ok)"
+      o_err="$(_janus_meta_get "${meta}" err)"
    fi
-   local succ_lines="${o_succ:-${WHISPER_CONTEXT_SUCCESS}}"
-   local fail_lines="${o_fail:-${WHISPER_CONTEXT_FAIL}}"
-   local ok_text="${o_ok:-${WHISPER_OK_TEXT}}"
-   local err_text="${o_err:-${WHISPER_ERR_TEXT}}"
+   local succ_lines="${o_succ:-${JANUS_CONTEXT_SUCCESS}}"
+   local fail_lines="${o_fail:-${JANUS_CONTEXT_FAIL}}"
+   local ok_text="${o_ok:-${JANUS_OK_TEXT}}"
+   local err_text="${o_err:-${JANUS_ERR_TEXT}}"
 
    # Pad the header to the global header column, and the status word to the global
    # status width (separate from the spinner width). Clear to end of line after the

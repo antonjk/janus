@@ -13,7 +13,7 @@ source "${ROOT}/include/trap.inc"
 source "${ROOT}/include/temp.inc"
 source "${ROOT}/include/cprintf.inc"
 source "${ROOT}/include/spinner.inc"
-source "${ROOT}/include/whisper.inc"
+source "${ROOT}/include/janus.inc"
 
 # Each step appends "<name> <start|end> <epoch-ms>" to this shared log.
 EVLOG="$(temp_file evlog.XXXX)"
@@ -26,32 +26,32 @@ mk() {   # mk <name>  -> emits a body that logs start, sleeps, logs end
    printf 'printf "%%s end %%s\\n" "%s" "$(date +%%s%%N)" >>"%s"\n' "${name}" "${EVLOG}"
 }
 
-whisper-group --async "outer"
-  whisper-step "1" <<BODY
+janus-group --async "outer"
+  janus-step "1" <<BODY
   printf "Done\n"
 $(mk 1)
 BODY
-  whisper-step "2" <<BODY
+  janus-step "2" <<BODY
 $(mk 2)
 BODY
-  whisper-group --async "nested"
-    whisper-step "3" <<BODY
+  janus-group --async "nested"
+    janus-step "3" <<BODY
 $(mk 3)
 BODY
-    whisper-step "4" <<BODY
+    janus-step "4" <<BODY
 $(mk 4)
 BODY
-  whisper-group-end
-  whisper-step "5" <<BODY
+  janus-group-end
+  janus-step "5" <<BODY
 $(mk 5)
 BODY
-whisper-group-end
+janus-group-end
 
 echo "=== tree ==="
-cat "$(temp_dir)/whisper/tree"
+cat "$(temp_dir)/janus/tree"
 
 echo "=== exec ==="
-whisper-exec
+janus-exec
 rc=$?
 echo "exec_rc=${rc}"
 

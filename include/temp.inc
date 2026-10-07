@@ -26,7 +26,7 @@ function temp_file() {
 
 ## ####################################################################################################################
 ##  Returns the per-PID temp folder path for the given PID (default: current $$).
-##  Does not create it. Useful for building sub-paths (e.g. the whisper spool dir).
+##  Does not create it. Useful for building sub-paths (e.g. the janus spool dir).
 ## ####################################################################################################################
 function temp_dir() {
    echo "/tmp/PID-${1:-$$}"

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 ########################################################################################################################
-# whisper-run — transpile an annotated script and run it with the whisper engine.
+# janus-run — transpile an annotated script and run it with the janus engine.
 #
 # Usage:
-#   whisper-run [--emit] <script> [args...]
+#   janus-run [--emit] <script> [args...]
 #
 # As a shebang interpreter:
-#   #!/usr/bin/env whisper-run
+#   #!/usr/bin/env janus-run
 #   ...annotated script...
 # then `./script` runs it under the engine. To debug sequentially, change the
 # shebang to `#!/usr/bin/env bash` and the #@ directives become inert comments.
@@ -16,24 +16,24 @@
 #   -h|--help   Show help.
 #
 # Transpilation (see DESIGN.md s5):
-#   #@ group: T                      -> whisper-group "T"
-#   #@ group async: T                -> whisper-group --async "T"
-#   #@ group async=N: T              -> whisper-group --async N "T"
-#   #@ step [id=X] [depends=a,b]: T   -> whisper-step [--id X] [--depends a,b] "T" <<DELIM
+#   #@ group: T                      -> janus-group "T"
+#   #@ group async: T                -> janus-group --async "T"
+#   #@ group async=N: T              -> janus-group --async N "T"
+#   #@ step [id=X] [depends=a,b]: T   -> janus-step [--id X] [--depends a,b] "T" <<DELIM
 #   <body...>                             <body...>
 #   #@ end  (closing a step)              DELIM
-#   #@ end  (closing a group)        -> whisper-group-end
+#   #@ end  (closing a group)        -> janus-group-end
 #
 # Heredoc delimiters are UNQUOTED (body expands at registration) and UNIQUE per step.
 ########################################################################################################################
 
 set -o pipefail
 
-WHISPER_RUN_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-WHISPER_ROOT="$(cd "$(dirname "${WHISPER_RUN_SELF}")/.." && pwd)"
-WHISPER_INCLUDE="${WHISPER_ROOT}/include"
+JANUS_RUN_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+JANUS_ROOT="$(cd "$(dirname "${JANUS_RUN_SELF}")/.." && pwd)"
+JANUS_INCLUDE="${JANUS_ROOT}/include"
 
-die() { printf 'whisper-run: %s\n' "$*" >&2; exit 1; }
+die() { printf 'janus-run: %s\n' "$*" >&2; exit 1; }
 
 # Quote a directive header for emission. A header is treated as a DOUBLE-QUOTED shell
 # context: we wrap it in double quotes verbatim and do NOT escape its contents, so
@@ -47,12 +47,12 @@ _wq() {
 
 usage() {
    cat <<EOF
-Usage: whisper-run [--emit] <script> [args...]
+Usage: janus-run [--emit] <script> [args...]
 
   --emit      Print the transpiled script to stdout and exit (do not run).
   -h, --help  Show this help.
 
-Used as a shebang:  #!/usr/bin/env whisper-run
+Used as a shebang:  #!/usr/bin/env janus-run
 EOF
 }
 
@@ -96,12 +96,12 @@ transpile() {
       # the runtime source right after it.
       if (( injected_prologue == 0 )) && [[ "${line}" == '#!'* ]]; then
          printf '#!/usr/bin/env bash\n'
-         printf '# --- transpiled by whisper-run from %s ---\n' "${src}"
-         printf 'source %q/trap.inc\n' "${WHISPER_INCLUDE}"
-         printf 'source %q/temp.inc\n' "${WHISPER_INCLUDE}"
-         printf 'source %q/cprintf.inc\n' "${WHISPER_INCLUDE}"
-         printf 'source %q/spinner.inc\n' "${WHISPER_INCLUDE}"
-         printf 'source %q/whisper.inc\n' "${WHISPER_INCLUDE}"
+         printf '# --- transpiled by janus-run from %s ---\n' "${src}"
+         printf 'source %q/trap.inc\n' "${JANUS_INCLUDE}"
+         printf 'source %q/temp.inc\n' "${JANUS_INCLUDE}"
+         printf 'source %q/cprintf.inc\n' "${JANUS_INCLUDE}"
+         printf 'source %q/spinner.inc\n' "${JANUS_INCLUDE}"
+         printf 'source %q/janus.inc\n' "${JANUS_INCLUDE}"
          injected_prologue=1
          continue
       fi
@@ -127,9 +127,9 @@ transpile() {
                   async_arg="--async"
                fi
                if [[ -n "${async_arg}" ]]; then
-                  printf 'whisper-group %s %s\n' "${async_arg}" "$(_wq "${header}")"
+                  printf 'janus-group %s %s\n' "${async_arg}" "$(_wq "${header}")"
                else
-                  printf 'whisper-group %s\n' "$(_wq "${header}")"
+                  printf 'janus-group %s\n' "$(_wq "${header}")"
                fi
                stack+=("group")
                ;;
@@ -153,10 +153,10 @@ transpile() {
                   esac
                done
                uid=$(( uid + 1 ))
-               local delim="WHISPER_STEP_${uid}"
-               # Build the whisper-step call. Unquoted heredoc delimiter => body
+               local delim="JANUS_STEP_${uid}"
+               # Build the janus-step call. Unquoted heredoc delimiter => body
                # expands at registration.
-               printf 'whisper-step'
+               printf 'janus-step'
                [[ -n "${id_arg}" ]]   && printf ' %s' "${id_arg}"
                [[ -n "${dep_arg}" ]]  && printf ' %s' "${dep_arg}"
                [[ -n "${succ_arg}" ]] && printf ' %s' "${succ_arg}"
@@ -175,7 +175,7 @@ transpile() {
                if [[ "${top}" == step:* ]]; then
                   printf '%s\n' "${top#step:}"          # close the heredoc
                else
-                  printf 'whisper-group-end\n'
+                  printf 'janus-group-end\n'
                fi
                ;;
             *)
@@ -197,7 +197,7 @@ transpile() {
    # (Handled below by the caller for the emit/run split.)
 
    # Epilogue: run the registered tree.
-   printf 'whisper-exec\n'
+   printf 'janus-exec\n'
 }
 
 # If the script had no shebang at all, the prologue was never injected. Detect and
@@ -210,12 +210,12 @@ needs_prologue() {
 emit_transpiled() {
    if needs_prologue "${SCRIPT}"; then
       printf '#!/usr/bin/env bash\n'
-      printf '# --- transpiled by whisper-run from %s (no shebang in source) ---\n' "${SCRIPT}"
-      printf 'source %q/trap.inc\n'    "${WHISPER_INCLUDE}"
-      printf 'source %q/temp.inc\n'    "${WHISPER_INCLUDE}"
-      printf 'source %q/cprintf.inc\n' "${WHISPER_INCLUDE}"
-      printf 'source %q/spinner.inc\n' "${WHISPER_INCLUDE}"
-      printf 'source %q/whisper.inc\n' "${WHISPER_INCLUDE}"
+      printf '# --- transpiled by janus-run from %s (no shebang in source) ---\n' "${SCRIPT}"
+      printf 'source %q/trap.inc\n'    "${JANUS_INCLUDE}"
+      printf 'source %q/temp.inc\n'    "${JANUS_INCLUDE}"
+      printf 'source %q/cprintf.inc\n' "${JANUS_INCLUDE}"
+      printf 'source %q/spinner.inc\n' "${JANUS_INCLUDE}"
+      printf 'source %q/janus.inc\n' "${JANUS_INCLUDE}"
    fi
    # transpile() injects the prologue itself only when it sees a shebang on line 1;
    # with no shebang it emits none, which is why we injected it above.
@@ -228,7 +228,7 @@ if (( EMIT )); then
 fi
 
 # Run: transpile to a temp file, then execute it with the forwarded args.
-TMP_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/whisper-run.XXXXXX")" || die "mktemp failed"
+TMP_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/janus-run.XXXXXX")" || die "mktemp failed"
 trap 'rm -f "${TMP_SCRIPT}"' EXIT
 emit_transpiled >"${TMP_SCRIPT}" || die "transpilation failed"
 

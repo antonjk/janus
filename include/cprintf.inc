@@ -2,7 +2,7 @@
 _CPRINTF_INC_SOURCED=1
 
 ########################################################################################################################
-# Whisper color wrapper.
+# Janus color wrapper.
 #
 # Provides `cprintf` / `ceprintf` (printf with <fg:...>, <b>, etc. markup). Resolution order:
 #   1. A `cprintf` already on PATH (e.g. a system install of antonjk/bash-cprintf).

@@ -1,4 +1,4 @@
-# Whisper — Annotated Script Executor
+# Janus — Annotated Script Executor
 
 ## 1. Goal
 
@@ -8,21 +8,21 @@ invocation is always the same (`./script.sh`) and the intent lives in the file.
 
 | Shebang                        | `./script.sh` does                                      |
 |--------------------------------|---------------------------------------------------------|
-| `#!/usr/bin/env whisper-run`   | transpile + run with the whisper engine (concurrent, UI)|
+| `#!/usr/bin/env janus-run`   | transpile + run with the janus engine (concurrent, UI)|
 | `#!/usr/bin/env bash` (or `#!/bin/bash`) | plain sequential run; `#@` lines inert        |
 
 1. **Direct run** — shebang is `bash`. The `#@` lines are inert comments. The script
    executes top-to-bottom, sequentially. This is the debugging / plain-shell mode.
-   Behaviour must match the whisper run for the common cases. To debug an annotated
+   Behaviour must match the janus run for the common cases. To debug an annotated
    script, flip the one shebang line to `#!/usr/bin/env bash`.
 
-2. **Whisper run** — shebang is `whisper-run`. The kernel execs
-   `whisper-run /abs/path/script.sh [args...]`; `whisper-run` acts as an
+2. **Janus run** — shebang is `janus-run`. The kernel execs
+   `janus-run /abs/path/script.sh [args...]`; `janus-run` acts as an
    **interpreter** (see §5): it transpiles the directives into a tree of **groups**
    (branches) and **steps** (leaves), then runs them with concurrency, progress UI,
    and per-step output capture.
 
-The annotated source file never contains whisper runtime calls. The runtime wiring
+The annotated source file never contains janus runtime calls. The runtime wiring
 is added by the transpiler.
 
 ## 2. Vocabulary
@@ -30,11 +30,11 @@ is added by the transpiler.
 - **Group** — a branch node. Runs its children in registration order. May be
   `async` (adjacent steps batch concurrently) or sync (children one at a time).
 - **Step** — a leaf node. A captured block of shell that the engine runs as one unit.
-- **Registration pass** — whisper executes the (transpiled) script once. All non-step
+- **Registration pass** — janus executes the (transpiled) script once. All non-step
   code runs immediately; it is the "driver" that decides which groups/steps exist
-  (loops, command substitution, etc.). `whisper-step` only *captures* its body; it
+  (loops, command substitution, etc.). `janus-step` only *captures* its body; it
   does not run it yet.
-- **Execution pass** — after registration, `whisper-exec` walks the tree and runs the
+- **Execution pass** — after registration, `janus-exec` walks the tree and runs the
   captured step bodies according to group semantics.
 
 ## 3. Annotation grammar
@@ -53,9 +53,9 @@ is added by the transpiler.
 - `async` with no `=N` means unbounded concurrency within a batch; `async=N` caps it.
 - Per-step display overrides (all optional; fall back to global env defaults):
   - `success=<N>` / `fail=<N>` — context lines to show on success / failure
-    (override `WHISPER_CONTEXT_SUCCESS` / `WHISPER_CONTEXT_FAIL`).
+    (override `JANUS_CONTEXT_SUCCESS` / `JANUS_CONTEXT_FAIL`).
   - `ok=<word>` / `err=<word>` — status word shown on success / failure
-    (override `WHISPER_OK_TEXT` / `WHISPER_ERR_TEXT`, default `OK` / `ERR`).
+    (override `JANUS_OK_TEXT` / `JANUS_ERR_TEXT`, default `OK` / `ERR`).
     Single word only (the attribute list is space-separated).
 - Header text is a normal string; it is **expanded at registration time** (so
   `$(...)`, `${var}` in a header resolve in the lexical context where the directive
@@ -97,45 +97,45 @@ A sync group (`#@ group:` with no `async`) runs 1, then 2, then nested(3 then 4)
 
 ## 5. Transpilation
 
-`whisper-run` rewrites the annotated source into an executable script, then runs it
+`janus-run` rewrites the annotated source into an executable script, then runs it
 (or prints it with `--emit`).
 
 ### 5.0 Interpreter contract
 
-`whisper-run` is designed to be used as a shebang interpreter
-(`#!/usr/bin/env whisper-run`). When the kernel execs an annotated script it calls:
+`janus-run` is designed to be used as a shebang interpreter
+(`#!/usr/bin/env janus-run`). When the kernel execs an annotated script it calls:
 
 ```
-whisper-run /abs/path/script.sh [script-args...]
+janus-run /abs/path/script.sh [script-args...]
 ```
 
-- **File-vs-flag detection.** `whisper-run` inspects its first argument. If it is a
-  known flag (e.g. `--emit`), it is consumed by `whisper-run`; the **first
+- **File-vs-flag detection.** `janus-run` inspects its first argument. If it is a
+  known flag (e.g. `--emit`), it is consumed by `janus-run`; the **first
   non-flag argument** is the target script path. This lets the same binary serve both
-  as an interpreter (`whisper-run script.sh ...`) and as an explicit debug command
-  (`whisper-run --emit script.sh`).
+  as an interpreter (`janus-run script.sh ...`) and as an explicit debug command
+  (`janus-run --emit script.sh`).
 - **Argument forwarding (required).** Everything after the target script path is
   forwarded into the transpiled script as its own `$@`. So an annotated script can
   take its own CLI arguments (as `whisper-build` forwards `brazil-build-options`).
-  Under `bash script.sh args` this is free; as an interpreter `whisper-run` must do it
+  Under `bash script.sh args` this is free; as an interpreter `janus-run` must do it
   explicitly.
 - **No flags in the shebang.** `#!/usr/bin/env` passes **at most one** argument
-  (the interpreter name) portably; `#!/usr/bin/env whisper-run --emit` is NOT reliable
+  (the interpreter name) portably; `#!/usr/bin/env janus-run --emit` is NOT reliable
   across kernels (notably macOS). Therefore `--emit` and any other flags are
   **explicit-invocation only** — never placed in a shebang. `--emit` is a debugging
   action (print the transpiled script and exit without running), not a run mode.
-- `whisper-run` itself is a plain Bash script (`#!/usr/bin/env bash`); it must be on
+- `janus-run` itself is a plain Bash script (`#!/usr/bin/env bash`); it must be on
   `PATH` for `/usr/bin/env` to resolve it, and the annotated script must be
   executable for `./script.sh` to work.
 
 | Directive                                   | Emitted code                                             |
 |---------------------------------------------|----------------------------------------------------------|
-| `#@ group: T`                               | `whisper-group "T"`                                      |
-| `#@ group async: T`                         | `whisper-group --async "T"`                             |
-| `#@ group async=N: T`                       | `whisper-group --async N "T"`                           |
-| `#@ step: T` ... `#@ end`                   | `whisper-step "T" <<STEP_BODY_<uid>` / body / `STEP_BODY_<uid>` |
-| `#@ step id=X depends=a,b: T` ... `#@ end`  | `whisper-step --id X --depends a,b "T" <<STEP_BODY_<uid>` ... |
-| `#@ end` closing a group                    | `whisper-group-end`                                     |
+| `#@ group: T`                               | `janus-group "T"`                                      |
+| `#@ group async: T`                         | `janus-group --async "T"`                             |
+| `#@ group async=N: T`                       | `janus-group --async N "T"`                           |
+| `#@ step: T` ... `#@ end`                   | `janus-step "T" <<STEP_BODY_<uid>` / body / `STEP_BODY_<uid>` |
+| `#@ step id=X depends=a,b: T` ... `#@ end`  | `janus-step --id X --depends a,b "T" <<STEP_BODY_<uid>` ... |
+| `#@ end` closing a group                    | `janus-group-end`                                     |
 
 Rules:
 
@@ -144,43 +144,43 @@ Rules:
   in a body must be escaped (`\$`).
 - `<uid>` is **unique per step** so adjacent or driver-authored heredocs never collide.
 - The transpiler maintains an **open-block stack** to decide whether a given `#@ end`
-  closes a step (close heredoc) or a group (`whisper-group-end`).
-- **Prologue**: after the shebang, inject `source <dir>/include/whisper.inc`.
-- **Epilogue**: append `whisper-exec` at the end of the file.
+  closes a step (close heredoc) or a group (`janus-group-end`).
+- **Prologue**: after the shebang, inject `source <dir>/include/janus.inc`.
+- **Epilogue**: append `janus-exec` at the end of the file.
 - The original annotated file is never modified; transpilation targets a temp file
   (or stdout under `--emit`).
 
 ### Transpiled form of the rebase example
 
-The annotated source begins with `#!/usr/bin/env whisper-run`. `whisper-run`
+The annotated source begins with `#!/usr/bin/env janus-run`. `janus-run`
 transpiles it to the following Bash and executes that (the shebang is rewritten to
-`bash`, the runtime is sourced, `whisper-exec` is appended, and the script's own
+`bash`, the runtime is sourced, `janus-exec` is appended, and the script's own
 args are available as `$@`):
 
 ```bash
 #!/usr/bin/env bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/include/cprintf.inc"
-source "${SCRIPT_DIR}/include/whisper.inc"   # injected
+source "${SCRIPT_DIR}/include/janus.inc"   # injected
 
 cd "$(brazil-context workspace root)/src"
 
-whisper-group "Sync Versionset Metadata"
-  whisper-step "$(cat ../packageInfo | grep "versionSet" | sed 's/[^=]*=[^"]*"\([^"]*\)";/\1/g')" <<STEP_BODY_1
+janus-group "Sync Versionset Metadata"
+  janus-step "$(cat ../packageInfo | grep "versionSet" | sed 's/[^=]*=[^"]*"\([^"]*\)";/\1/g')" <<STEP_BODY_1
 brazil ws sync --md
 STEP_BODY_1
-whisper-group-end
+janus-group-end
 
-whisper-group --async 10 "Rebase Packages..."
+janus-group --async 10 "Rebase Packages..."
 for file in */; do
-  whisper-step "${file//\/}" <<STEP_BODY_2
+  janus-step "${file//\/}" <<STEP_BODY_2
 cd "${file}"
 git-stash-and-rebase.sh
 STEP_BODY_2
 done
-whisper-group-end
+janus-group-end
 
-whisper-exec   # injected
+janus-exec   # injected
 ```
 
 ## 6. Runtime (registry + engine)
@@ -189,7 +189,7 @@ State lives in a **spool directory** on disk, not shell arrays, so it survives
 subshells (`( ... )`). Reuse `temp.inc` (`temp_file`, EXIT cleanup of `/tmp/PID-$$`).
 
 ```
-/tmp/PID-$$/whisper/
+/tmp/PID-$$/janus/
   tree                 # append-only, one record per node
   step.<uid>.body      # captured (already expanded) step body
   step.<uid>.out       # runtime stdout+stderr for that step
@@ -206,17 +206,17 @@ GROUP_END|0|g1||
 Append-only + depth reconstructs the tree without nested shell data structures and is
 immune to subshell scoping.
 
-### Runtime API (in `include/whisper.inc`)
+### Runtime API (in `include/janus.inc`)
 
-- `whisper-group [--async[=N]] "<header>"` — append a GROUP record, push onto a depth stack.
-- `whisper-group-end` — append a GROUP_END record, pop the depth stack.
-- `whisper-step [--id X] [--depends a,b] "<header>"` — read stdin (the heredoc body)
+- `janus-group [--async[=N]] "<header>"` — append a GROUP record, push onto a depth stack.
+- `janus-group-end` — append a GROUP_END record, pop the depth stack.
+- `janus-step [--id X] [--depends a,b] "<header>"` — read stdin (the heredoc body)
   into `step.<uid>.body`, append a STEP record. **Does not execute.**
-- `whisper-exec` — parse `tree`, walk it per §4, run step bodies with concurrency,
+- `janus-exec` — parse `tree`, walk it per §4, run step bodies with concurrency,
   spinner (`spinner.inc`), and colored status (`cprintf.inc`); print per-step
   success/fail context (tail of `step.<uid>.out`).
 
-### Engine (whisper-exec) — pseudocode
+### Engine (janus-exec) — pseudocode
 
 ```
 walk(group):
@@ -255,7 +255,7 @@ reaps running step children; `temp.inc` removes the spool dir.
 - Enforce `depends` (intra-group DAG gate).
 - Group-level `depends`.
 - Concurrency across nested groups (currently a barrier).
-- Reconcile step-body quoting so direct-run and whisper-run agree in more edge cases.
+- Reconcile step-body quoting so direct-run and janus-run agree in more edge cases.
 
 ## 8. Proposed workspace layout
 
@@ -263,10 +263,10 @@ reaps running step children; `temp.inc` removes the spool dir.
 /Users/akoekemo/workplace/Whisper/
   DESIGN.md
   bin/
-    whisper-run          # transpiler + driver (--emit to print transpiled script)
-    whisper-exec         # (optional) standalone engine entry if run outside whisper-run
+    janus-run          # transpiler + driver (--emit to print transpiled script)
+    janus-exec         # (optional) standalone engine entry if run outside janus-run
   include/
-    whisper.inc          # runtime: whisper-group/step/group-end/exec (+ legacy emitters)
+    janus.inc            # runtime: janus-group/step/group-end/exec
     temp.inc             # spool dir + cleanup        (ported/reused)
     trap.inc             # trap_add + kill_descendant (ported/reused)
     spinner.inc          # spinner                    (ported/reused)
@@ -284,11 +284,11 @@ reaps running step children; `temp.inc` removes the spool dir.
 2. ~~Includes: port vs. source~~ — **DECIDED:** `temp.inc`, `trap.inc`, `spinner.inc`
    are **ported/copied** into `include/`. Color is provided by **vendoring upstream
    `cprintf`** (antonjk/bash-cprintf, MIT, commit `bf33ebf`) into `include/cprintf/`
-   (entry script + required `cprintf-*.inc` + `LICENSE`). Whisper's own thin
+   (entry script + required `cprintf-*.inc` + `LICENSE`). Janus's own thin
    `include/cprintf.inc` wrapper resolves color in this order: (1) a `cprintf` on
    `PATH`, (2) the vendored `include/cprintf/cprintf`, (3) a plain-`printf` stub that
    strips `<...>` markup — so the engine never hard-fails on formatting and the
    workspace runs anywhere (it is not currently installed on this machine).
-3. ~~`command`-builtin shadowing~~ — **MOOT:** legacy emitters are dropped. `whisper.inc`
-   is a clean runtime (`whisper-group` / `whisper-step` / `whisper-group-end` /
-   `whisper-exec`) with no `h1/h2/h3/command` functions, so nothing shadows the builtin.
+3. ~~`command`-builtin shadowing~~ — **MOOT:** legacy emitters are dropped. `janus.inc`
+   is a clean runtime (`janus-group` / `janus-step` / `janus-group-end` /
+   `janus-exec`) with no `h1/h2/h3/command` functions, so nothing shadows the builtin.
