@@ -161,8 +161,9 @@ transpile() {
             end)
                # Close the most recent open block.
                (( ${#stack[@]} > 0 )) || die "unmatched '#@ end' in ${src}"
-               local top="${stack[-1]}"
-               unset 'stack[-1]'
+               local _last=$(( ${#stack[@]} - 1 ))
+               local top="${stack[$_last]}"
+               unset "stack[$_last]"
                if [[ "${top}" == step:* ]]; then
                   printf '%s\n' "${top#step:}"          # close the heredoc
                else

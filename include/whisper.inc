@@ -153,6 +153,19 @@ whisper-exec() {
    done <"${spool}/tree"
 
    local n=${#_WT_TYPE[@]}
+
+   # Global header-field width: the widest STEP "indent + header" across the whole
+   # run, so every spinner/status box aligns on the same column (character count,
+   # matching the original whisper-exec.sh WIDTH).
+   _WT_MAXHDR=0
+   local _k
+   for (( _k=0; _k<n; _k++ )); do
+      [[ "${_WT_TYPE[$_k]}" == "STEP" ]] || continue
+      local _indent_w=$(( ( ${_WT_DEPTH[$_k]} + 1 ) * WHISPER_INDENT ))
+      local _w=$(( _indent_w + ${#_WT_HEADER[$_k]} ))
+      (( _w > _WT_MAXHDR )) && _WT_MAXHDR=${_w}
+   done
+
    local overall=0
    # Walk the top level (depth 0 nodes), recursing into groups.
    # _WT_CURSOR is a global index advanced by _whisper_walk_node (avoids nameref
@@ -288,53 +301,89 @@ _whisper_run_batch() {
       local uid="${_WT_ID[$idx]}"
       local out="${spool}/step.${uid}.out"
       local pid="${step_pid[$pos]}"
+      local header="${_WT_HEADER[$idx]}"
 
-      _whisper_print_step_start "${_WT_HEADER[$idx]}" "${depth}"
-      # Focus on this step: animate while alive (TTY only), topping up the window.
-      _whisper_wait_with_spinner "${pid}" "${depth}"
+      if [[ -t 1 ]]; then
+         # TTY: the spinner owns the task line (header + animated spinner on ONE line).
+         _whisper_spin_on_line "${pid}" "${depth}" "${header}"
+      else
+         # Non-TTY: emit a start line, then wait with no animation.
+         _whisper_print_step_start "${header}" "${depth}"
+         _whisper_wait_with_spinner "${pid}" "${depth}"
+      fi
       wait "${pid}"; local st=$?
       (( st != 0 )) && rc=1
-      _whisper_print_step_done "${_WT_HEADER[$idx]}" "${st}" "${out}" "${depth}"
+      _whisper_print_step_done "${header}" "${st}" "${out}" "${depth}"
    done
 
    unset -f _whisper_launch_window 2>/dev/null
    return ${rc}
 }
 
-# Wait for a PID. On a TTY, animate a single in-place spinner next to the current
-# line until the PID exits. On a non-TTY, just block (no animation). The launch
-# window is topped up each tick so other steps keep running.
+# Non-TTY waiter: no animation, just block until the PID exits, topping up the
+# launch window each tick so other steps keep running.
 _whisper_wait_with_spinner() {
    local pid="$1" depth="$2"
-   # Non-TTY: no animation, just wait.
-   if [[ ! -t 1 ]]; then
-      while kill -0 "${pid}" 2>/dev/null; do
-         declare -f _whisper_launch_window >/dev/null 2>&1 && _whisper_launch_window
-         sleep 0.1
-      done
-      return 0
-   fi
-
-   # TTY: animate using spinner.inc if available.
-   if ! declare -f spin >/dev/null 2>&1; then
-      while kill -0 "${pid}" 2>/dev/null; do sleep 0.1; done
-      return 0
-   fi
-
-   local opts take inc pos
-   eval "opts=$(spinopts "${WHISPER_SPINNER:-wave-bars}" "(%c %t %i)")"
-   take="${opts[1]:-1}"; inc="${opts[2]:-1}"; pos=0
-   local pad; pad="$(_whisper_indent $(( depth + 2 )))"
-   tput civis 2>/dev/null
    while kill -0 "${pid}" 2>/dev/null; do
       declare -f _whisper_launch_window >/dev/null 2>&1 && _whisper_launch_window
-      spin "${pad}[ <fg:blue>%b</fg> ]" "${opts[0]}" "${pos}" "${take}"
-      pos=$(( pos + inc ))
-      sleep 0.25
+      sleep 0.1
+   done
+   return 0
+}
+
+# TTY spinner that shares the task line. Renders
+#     <indent><header>  [ <spinner-glyph> ]
+# redrawing in place (carriage return) each tick until the PID exits, then clears
+# the line so the final result line (printed by the caller) replaces it.
+#
+# Padding matches the original whisper-exec.sh: the spinner occupies a fixed visible
+# area of WHISPER_SPINNER_AREA columns. Because printf field widths count BYTES (not
+# display columns), a multibyte glyph set needs a widened byte field:
+#     SPINNER_WIDTH = (AREA - take) + (take * bytes_per_glyph)
+: "${WHISPER_SPINNER_AREA:=5}"
+
+_whisper_spin_on_line() {
+   local pid="$1" depth="$2" header="$3"
+   local pad; pad="$(_whisper_indent $(( depth + 1 )))"
+
+   # Resolve glyphs/take/bytes from spinner.inc; else a simple ASCII set.
+   local glyphs take bytes
+   if declare -f spinopts >/dev/null 2>&1; then
+      local opts
+      eval "opts=$(spinopts "${WHISPER_SPINNER:-wave-bars}" "(%c %t %i %b)")"
+      glyphs="${opts[0]}"; take="${opts[1]:-1}"; bytes="${opts[3]:-1}"
+   else
+      glyphs='|/-\'; take=1; bytes=1
+   fi
+   local nglyph=${#glyphs}
+   (( nglyph < 1 )) && { glyphs='*'; nglyph=1; take=1; bytes=1; }
+
+   # Byte-aware field width so the spinner box stays WHISPER_SPINNER_AREA columns wide.
+   local area="${WHISPER_SPINNER_AREA}"
+   local spin_w=$(( (area - take) + (take * bytes) ))
+   (( spin_w < 1 )) && spin_w=1
+
+   # Doubled glyph string so the sliding window wraps cleanly.
+   local work="${glyphs}${glyphs}"
+
+   # Pad the header so (indent + header) == global _WT_MAXHDR, aligning every box.
+   local hdr_w=$(( ${_WT_MAXHDR:-0} - ${#pad} ))
+   (( hdr_w < ${#header} )) && hdr_w=${#header}
+
+   tput civis 2>/dev/null
+   local i=0
+   while kill -0 "${pid}" 2>/dev/null; do
+      declare -f _whisper_launch_window >/dev/null 2>&1 && _whisper_launch_window
+      local frame="${work:$(( i % nglyph )):${take}}"
+      # Redraw the whole line: padded header then spinner (left-justified in spin_w bytes).
+      cprintf "\r%s<fg:white>%-${hdr_w}s</fg>  [ <fg:blue>%-${spin_w}b</fg> ]" "${pad}" "${header}" "${frame}"
+      i=$(( i + 1 ))
+      sleep 0.1
    done
    tput cnorm 2>/dev/null
-   # Clear the spinner line before the result is printed.
-   printf '\r%*s\r' "$(( ${#pad} + 8 ))" '' 2>/dev/null
+   # Clear the spinner line (carriage return + erase to end of line) so the caller's
+   # result line starts clean regardless of header length.
+   printf '\r\033[K' 2>/dev/null
 }
 
 
@@ -365,18 +414,23 @@ _whisper_print_step_start() {
 
 _whisper_print_step_done() {
    # $1 = header, $2 = status, $3 = out file, $4 = depth (of containing group)
+   # Layout mirrors the spinner line: "<header>  [ STATUS ]" so the TTY transition
+   # from spinner to result stays in place.
    local header="$1" status="$2" out="$3" depth="${4:-0}"
    local pad; pad="$(_whisper_indent $(( depth + 1 )))"
    local opad; opad="$(_whisper_indent $(( depth + 2 )))"
+   # Pad the header so (indent + header) == global _WT_MAXHDR, aligning every box.
+   local hdr_w=$(( ${_WT_MAXHDR:-0} - ${#pad} ))
+   (( hdr_w < ${#header} )) && hdr_w=${#header}
    if (( status == 0 )); then
-      cprintf "%s[ <fg:green>%s</fg> ] %s\n" "${pad}" "OK" "${header}"
+      cprintf "%s<fg:white>%-${hdr_w}s</fg>  [ <fg:green>%-${WHISPER_SPINNER_AREA}s</fg> ]\n" "${pad}" "${header}" "OK"
       if (( WHISPER_CONTEXT_SUCCESS > 0 )) && [[ -s "${out}" ]]; then
          tail -n "${WHISPER_CONTEXT_SUCCESS}" "${out}" | while IFS= read -r l; do
             cprintf "%s%s\n" "${opad}" "${l}"
          done
       fi
    else
-      cprintf "%s[ <fg:red>%s</fg> ] %s\n" "${pad}" "ERR" "${header}"
+      cprintf "%s<fg:white>%-${hdr_w}s</fg>  [ <fg:red>%-${WHISPER_SPINNER_AREA}s</fg> ]\n" "${pad}" "${header}" "ERR"
       if (( WHISPER_CONTEXT_FAIL > 0 )) && [[ -s "${out}" ]]; then
          tail -n "${WHISPER_CONTEXT_FAIL}" "${out}" | while IFS= read -r l; do
             cprintf "%s<fg:red>%s</fg>\n" "${opad}" "${l}"
