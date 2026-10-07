@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+########################################################################################################################
+# build-janus — produce a standalone single-file `janus` from bin/janus-run + include/*.
+#
+# The dev `janus-run` emits `source <dir>/include/*.inc` lines into each transpiled
+# script (see _janus_emit_runtime, bounded by the JANUS-RUNTIME-EMIT markers). This
+# bundler rewrites that marker region so the standalone janus instead emits the
+# runtime INLINE into the transpiled script — no include/ directory required at run
+# time.
+#
+# cprintf handling (build decision 1a): the bundle inlines Janus's own cprintf.inc
+# WRAPPER with its vendored-directory branch removed, so color resolves to a PATH
+# `cprintf` if present, else the plain-printf stub. The multi-file vendored cprintf
+# library is NOT inlined.
+#
+# Usage: scripts/build-janus [output]
+#   output defaults to dist/janus
+########################################################################################################################
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${HERE}/.." && pwd)"
+INC="${ROOT}/include"
+SRC="${ROOT}/bin/janus-run"
+OUT="${1:-${ROOT}/dist/janus}"
+
+START_MARK='# >>> JANUS-RUNTIME-EMIT'
+END_MARK='# <<< JANUS-RUNTIME-EMIT <<<'
+
+[[ -r "${SRC}" ]] || { echo "build-janus: cannot read ${SRC}" >&2; exit 1; }
+for f in trap.inc temp.inc cprintf.inc spinner.inc janus.inc; do
+   [[ -r "${INC}/${f}" ]] || { echo "build-janus: missing include ${INC}/${f}" >&2; exit 1; }
+done
+
+mkdir -p "$(dirname "${OUT}")"
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Produce the inlined cprintf.inc wrapper: strip the vendored-directory branch so the
+# bundle resolves PATH cprintf -> plain-printf stub (no vendored dir in a single file).
+# We drop the `elif [[ -r "${_CPRINTF_INC_DIR}/cprintf/cprintf" ]] ... ` branch.
+# ---------------------------------------------------------------------------------------------------------------------
+bundled_cprintf_inc() {
+   awk '
+      /elif \[\[ -r "\$\{_CPRINTF_INC_DIR\}\/cprintf\/cprintf" \]\]; then/ { skip=1 }
+      skip && /_CPRINTF_BACKEND="vendored"/ { skip=0; next }
+      skip { next }
+      { print }
+   ' "${INC}/cprintf.inc"
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# The replacement body for the marker region. It emits a single quoted heredoc into
+# the transpiled script carrying the entire runtime, then the transpiled script
+# sources that (via process substitution is awkward; we just inline directly by
+# printing the runtime text wrapped so it executes in the transpiled shell).
+#
+# Simplest robust approach: emit the runtime as a heredoc assigned to nothing — i.e.
+# print the raw runtime lines directly into the transpiled script. Since the runtime
+# is plain bash (function defs + guarded top-level), printing it inline is enough.
+# ---------------------------------------------------------------------------------------------------------------------
+emit_inlined_runtime_block() {
+   # The marker-region replacement is a function body that `cat`s a quoted heredoc
+   # containing the concatenated runtime. A quoted delimiter keeps the runtime
+   # verbatim (no expansion) as it is written into the transpiled script.
+   cat <<'REPL_HEAD'
+   # >>> JANUS-RUNTIME-EMIT (bundled: inline runtime) >>>
+   cat <<'__JANUS_RUNTIME__'
+REPL_HEAD
+
+   # Concatenate the runtime. Order matters: trap -> temp -> cprintf -> spinner -> janus.
+   cat "${INC}/trap.inc"
+   cat "${INC}/temp.inc"
+   bundled_cprintf_inc
+   cat "${INC}/spinner.inc"
+   cat "${INC}/janus.inc"
+
+   cat <<'REPL_TAIL'
+__JANUS_RUNTIME__
+   # <<< JANUS-RUNTIME-EMIT <<<
+REPL_TAIL
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Rewrite janus-run: replace everything between START_MARK and END_MARK (inclusive)
+# with the inlined-runtime block.
+# ---------------------------------------------------------------------------------------------------------------------
+{
+   in_region=0
+   while IFS= read -r line || [[ -n "${line}" ]]; do
+      if [[ "${line}" == *"${START_MARK}"* ]]; then
+         in_region=1
+         emit_inlined_runtime_block
+         continue
+      fi
+      if (( in_region )) && [[ "${line}" == *"${END_MARK}"* ]]; then
+         in_region=0
+         continue
+      fi
+      (( in_region )) && continue
+      printf '%s\n' "${line}"
+   done <"${SRC}"
+} >"${OUT}.tmp"
+
+mv "${OUT}.tmp" "${OUT}"
+chmod +x "${OUT}"
+echo "Built: ${OUT}"

@@ -78,6 +78,28 @@ done
 [[ -r "${SCRIPT}" ]] || die "cannot read script: ${SCRIPT}"
 
 # -------------------------------------------------------------------------------------------------
+# Runtime prologue emission.
+#
+# Emits the lines that load the janus runtime into the transpiled script. In the
+# development tree this sources the include files by path. The bundler
+# (scripts/build-janus) replaces everything between the RUNTIME-EMIT markers below
+# with a version that inlines the runtime contents, producing a standalone janus
+# that needs no include/ directory.
+#
+# Keep the marker comments on their own lines, exactly as written; the bundler
+# matches them literally.
+# -------------------------------------------------------------------------------------------------
+_janus_emit_runtime() {
+   # >>> JANUS-RUNTIME-EMIT (dev: source by path) >>>
+   printf 'source %q/trap.inc\n'    "${JANUS_INCLUDE}"
+   printf 'source %q/temp.inc\n'    "${JANUS_INCLUDE}"
+   printf 'source %q/cprintf.inc\n' "${JANUS_INCLUDE}"
+   printf 'source %q/spinner.inc\n' "${JANUS_INCLUDE}"
+   printf 'source %q/janus.inc\n'   "${JANUS_INCLUDE}"
+   # <<< JANUS-RUNTIME-EMIT <<<
+}
+
+# -------------------------------------------------------------------------------------------------
 # Transpiler
 #
 # Reads the annotated script on stdin, writes the transpiled script on stdout.
@@ -97,11 +119,7 @@ transpile() {
       if (( injected_prologue == 0 )) && [[ "${line}" == '#!'* ]]; then
          printf '#!/usr/bin/env bash\n'
          printf '# --- transpiled by janus-run from %s ---\n' "${src}"
-         printf 'source %q/trap.inc\n' "${JANUS_INCLUDE}"
-         printf 'source %q/temp.inc\n' "${JANUS_INCLUDE}"
-         printf 'source %q/cprintf.inc\n' "${JANUS_INCLUDE}"
-         printf 'source %q/spinner.inc\n' "${JANUS_INCLUDE}"
-         printf 'source %q/janus.inc\n' "${JANUS_INCLUDE}"
+         _janus_emit_runtime
          injected_prologue=1
          continue
       fi
@@ -211,11 +229,7 @@ emit_transpiled() {
    if needs_prologue "${SCRIPT}"; then
       printf '#!/usr/bin/env bash\n'
       printf '# --- transpiled by janus-run from %s (no shebang in source) ---\n' "${SCRIPT}"
-      printf 'source %q/trap.inc\n'    "${JANUS_INCLUDE}"
-      printf 'source %q/temp.inc\n'    "${JANUS_INCLUDE}"
-      printf 'source %q/cprintf.inc\n' "${JANUS_INCLUDE}"
-      printf 'source %q/spinner.inc\n' "${JANUS_INCLUDE}"
-      printf 'source %q/janus.inc\n' "${JANUS_INCLUDE}"
+      _janus_emit_runtime
    fi
    # transpile() injects the prologue itself only when it sees a shebang on line 1;
    # with no shebang it emits none, which is why we injected it above.

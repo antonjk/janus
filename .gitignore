@@ -6,3 +6,6 @@
 # Local scratch
 /tmp-*
 *.transpiled
+
+# Build artifacts
+/dist/
