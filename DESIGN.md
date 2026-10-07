@@ -1,5 +1,25 @@
 # Janus — Annotated Script Executor
 
+## Why "Janus"?
+
+Janus is the Roman god of doorways, beginnings, and transitions, depicted with
+**two faces** looking in opposite directions. The name was chosen because the
+defining feature of this tool is exactly that duality: a **single annotated script
+has two faces**, and which one you see depends only on the shebang.
+
+- Run under `bash`, the `#@` directives are inert comments and the file executes
+  plainly, top-to-bottom — the face for debugging and portability.
+- Run under `janus-run`, those same directives define groups and steps that execute
+  concurrently with a progress UI — the face for orchestration.
+
+The mythological fit goes further: Janus presides over **thresholds and gates**,
+which mirrors the engine's group **barriers** (a nested group is a gate the run
+passes through between batches), and over **transitions**, which mirrors steps moving
+from pending → running → done. One file, two faces, gated transitions — Janus.
+
+(Earlier working name: *Whisper*. Renamed to avoid collision with the widely known
+OpenAI Whisper and to pick a name whose meaning matches the tool's behaviour.)
+
 ## 1. Goal
 
 Write an ordinary Bash script, annotate it with `#@` comment directives, and get
