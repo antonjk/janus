@@ -134,18 +134,22 @@ transpile() {
                stack+=("group")
                ;;
             step*)
-               # step [id=X] [depends=a,b]: header
+               # step [id=X] [depends=a,b] [success=N] [fail=N] [ok=WORD] [err=WORD]: header
                local spec="${directive#step}"
                spec="${spec%%:*}"
                local header="${directive#*:}"
                header="${header#"${header%%[![:space:]]*}"}"
-               local id_arg="" dep_arg=""
-               # tokenise spec for id= / depends=
+               local id_arg="" dep_arg="" succ_arg="" fail_arg="" ok_arg="" err_arg=""
+               # tokenise spec (single-word values; ok/err are single words by design)
                local tok
                for tok in ${spec}; do
                   case "${tok}" in
                      id=*)      id_arg="--id ${tok#id=}" ;;
                      depends=*) dep_arg="--depends ${tok#depends=}" ;;
+                     success=*) succ_arg="--success ${tok#success=}" ;;
+                     fail=*)    fail_arg="--fail ${tok#fail=}" ;;
+                     ok=*)      ok_arg="--ok ${tok#ok=}" ;;
+                     err=*)     err_arg="--err ${tok#err=}" ;;
                   esac
                done
                uid=$(( uid + 1 ))
@@ -153,8 +157,12 @@ transpile() {
                # Build the whisper-step call. Unquoted heredoc delimiter => body
                # expands at registration.
                printf 'whisper-step'
-               [[ -n "${id_arg}" ]]  && printf ' %s' "${id_arg}"
-               [[ -n "${dep_arg}" ]] && printf ' %s' "${dep_arg}"
+               [[ -n "${id_arg}" ]]   && printf ' %s' "${id_arg}"
+               [[ -n "${dep_arg}" ]]  && printf ' %s' "${dep_arg}"
+               [[ -n "${succ_arg}" ]] && printf ' %s' "${succ_arg}"
+               [[ -n "${fail_arg}" ]] && printf ' %s' "${fail_arg}"
+               [[ -n "${ok_arg}" ]]   && printf ' %s' "${ok_arg}"
+               [[ -n "${err_arg}" ]]  && printf ' %s' "${err_arg}"
                printf ' %s <<%s\n' "$(_wq "${header}")" "${delim}"
                stack+=("step:${delim}")
                ;;

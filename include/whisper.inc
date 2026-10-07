@@ -104,12 +104,21 @@ whisper-group-end() {
 whisper-step() {
    _whisper_init
    local id="" depends="" header=""
+   local succ="" fail="" ok="" err=""
    while [[ $# -gt 0 ]]; do
       case "$1" in
          --id)        id="$2"; shift 2 ;;
          --id=*)      id="${1#--id=}"; shift ;;
          --depends)   depends="$2"; shift 2 ;;
          --depends=*) depends="${1#--depends=}"; shift ;;
+         --success)   succ="$2"; shift 2 ;;
+         --success=*) succ="${1#--success=}"; shift ;;
+         --fail)      fail="$2"; shift 2 ;;
+         --fail=*)    fail="${1#--fail=}"; shift ;;
+         --ok)        ok="$2"; shift 2 ;;
+         --ok=*)      ok="${1#--ok=}"; shift ;;
+         --err)       err="$2"; shift 2 ;;
+         --err=*)     err="${1#--err=}"; shift ;;
          --)          shift; break ;;
          -*)          shift ;;
          *)           break ;;
@@ -122,8 +131,20 @@ whisper-step() {
    # Capture the body (heredoc on stdin). Expansion already happened at registration
    # because the transpiler uses an UNQUOTED heredoc delimiter.
    cat >"${spool}/step.${uid}.body"
-   local meta="depends=${depends}"
+   # Meta is a ';'-separated kv list; empty values mean "use the global default".
+   local meta="depends=${depends};success=${succ};fail=${fail};ok=${ok};err=${err}"
    _whisper_record "STEP|${_WHISPER_DEPTH}|${uid}|${meta}|${header}"
+}
+
+# Extract a value for KEY from a ';'-separated kv meta string. Echoes the value
+# (possibly empty).
+_whisper_meta_get() {
+   local meta="$1" key="$2" kv
+   local IFS=';'
+   for kv in ${meta}; do
+      [[ "${kv%%=*}" == "${key}" ]] && { printf '%s' "${kv#*=}"; return 0; }
+   done
+   return 0
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -157,14 +178,26 @@ whisper-exec() {
    # Global header-field width: the widest STEP "indent + header" across the whole
    # run, so every spinner/status box aligns on the same column (character count,
    # matching the original whisper-exec.sh WIDTH).
+   #
+   # Global status-field width: the widest effective status word (per-step ok/err
+   # override, else the global default) across all steps, so every status box is the
+   # same width and the right edge stays uniform.
    _WT_MAXHDR=0
+   _WT_STATUS_W=0
    local _k
    for (( _k=0; _k<n; _k++ )); do
       [[ "${_WT_TYPE[$_k]}" == "STEP" ]] || continue
       local _indent_w=$(( ( ${_WT_DEPTH[$_k]} + 1 ) * WHISPER_INDENT ))
       local _w=$(( _indent_w + ${#_WT_HEADER[$_k]} ))
       (( _w > _WT_MAXHDR )) && _WT_MAXHDR=${_w}
+      # Effective status words for this step.
+      local _ok _err
+      _ok="$(_whisper_meta_get "${_WT_META[$_k]}" ok)";  [[ -z "${_ok}" ]]  && _ok="${WHISPER_OK_TEXT}"
+      _err="$(_whisper_meta_get "${_WT_META[$_k]}" err)"; [[ -z "${_err}" ]] && _err="${WHISPER_ERR_TEXT}"
+      (( ${#_ok}  > _WT_STATUS_W )) && _WT_STATUS_W=${#_ok}
+      (( ${#_err} > _WT_STATUS_W )) && _WT_STATUS_W=${#_err}
    done
+   (( _WT_STATUS_W < 1 )) && _WT_STATUS_W=1
 
    local overall=0
    # Walk the top level (depth 0 nodes), recursing into groups.
@@ -313,7 +346,7 @@ _whisper_run_batch() {
       fi
       wait "${pid}"; local st=$?
       (( st != 0 )) && rc=1
-      _whisper_print_step_done "${header}" "${st}" "${out}" "${depth}"
+      _whisper_print_step_done "${header}" "${st}" "${out}" "${depth}" "${idx}"
    done
 
    unset -f _whisper_launch_window 2>/dev/null
@@ -392,7 +425,9 @@ _whisper_spin_on_line() {
 # ---------------------------------------------------------------------------------------------------------------------
 : "${WHISPER_CONTEXT_SUCCESS:=2}"
 : "${WHISPER_CONTEXT_FAIL:=25}"
-: "${WHISPER_INDENT:=2}"   # spaces per nesting level
+: "${WHISPER_INDENT:=2}"       # spaces per nesting level
+: "${WHISPER_OK_TEXT:=OK}"     # default success status word
+: "${WHISPER_ERR_TEXT:=ERR}"   # default failure status word
 
 # Emit `depth * WHISPER_INDENT` spaces.
 _whisper_indent() {
@@ -413,26 +448,45 @@ _whisper_print_step_start() {
 }
 
 _whisper_print_step_done() {
-   # $1 = header, $2 = status, $3 = out file, $4 = depth (of containing group)
+   # $1=header $2=status $3=out $4=depth $5=step index (into _WT_* for meta lookup)
    # Layout mirrors the spinner line: "<header>  [ STATUS ]" so the TTY transition
    # from spinner to result stays in place.
-   local header="$1" status="$2" out="$3" depth="${4:-0}"
+   local header="$1" status="$2" out="$3" depth="${4:-0}" idx="${5:-}"
    local pad; pad="$(_whisper_indent $(( depth + 1 )))"
    local opad; opad="$(_whisper_indent $(( depth + 2 )))"
-   # Pad the header so (indent + header) == global _WT_MAXHDR, aligning every box.
+
+   # Per-step overrides (fall back to globals when unset).
+   local meta="" o_succ="" o_fail="" o_ok="" o_err=""
+   if [[ -n "${idx}" ]]; then
+      meta="${_WT_META[$idx]}"
+      o_succ="$(_whisper_meta_get "${meta}" success)"
+      o_fail="$(_whisper_meta_get "${meta}" fail)"
+      o_ok="$(_whisper_meta_get "${meta}" ok)"
+      o_err="$(_whisper_meta_get "${meta}" err)"
+   fi
+   local succ_lines="${o_succ:-${WHISPER_CONTEXT_SUCCESS}}"
+   local fail_lines="${o_fail:-${WHISPER_CONTEXT_FAIL}}"
+   local ok_text="${o_ok:-${WHISPER_OK_TEXT}}"
+   local err_text="${o_err:-${WHISPER_ERR_TEXT}}"
+
+   # Pad the header to the global header column, and the status word to the global
+   # status width (separate from the spinner width). Clear to end of line after the
+   # status so a wider spinner remnant leaves no artifact.
    local hdr_w=$(( ${_WT_MAXHDR:-0} - ${#pad} ))
    (( hdr_w < ${#header} )) && hdr_w=${#header}
+   local st_w="${_WT_STATUS_W:-3}"
+
    if (( status == 0 )); then
-      cprintf "%s<fg:white>%-${hdr_w}s</fg>  [ <fg:green>%-${WHISPER_SPINNER_AREA}s</fg> ]\n" "${pad}" "${header}" "OK"
-      if (( WHISPER_CONTEXT_SUCCESS > 0 )) && [[ -s "${out}" ]]; then
-         tail -n "${WHISPER_CONTEXT_SUCCESS}" "${out}" | while IFS= read -r l; do
+      cprintf "%s<fg:white>%-${hdr_w}s</fg>  [ <fg:green>%-${st_w}s</fg> ]\033[K\n" "${pad}" "${header}" "${ok_text}"
+      if (( succ_lines > 0 )) && [[ -s "${out}" ]]; then
+         tail -n "${succ_lines}" "${out}" | while IFS= read -r l; do
             cprintf "%s%s\n" "${opad}" "${l}"
          done
       fi
    else
-      cprintf "%s<fg:white>%-${hdr_w}s</fg>  [ <fg:red>%-${WHISPER_SPINNER_AREA}s</fg> ]\n" "${pad}" "${header}" "ERR"
-      if (( WHISPER_CONTEXT_FAIL > 0 )) && [[ -s "${out}" ]]; then
-         tail -n "${WHISPER_CONTEXT_FAIL}" "${out}" | while IFS= read -r l; do
+      cprintf "%s<fg:white>%-${hdr_w}s</fg>  [ <fg:red>%-${st_w}s</fg> ]\033[K\n" "${pad}" "${header}" "${err_text}"
+      if (( fail_lines > 0 )) && [[ -s "${out}" ]]; then
+         tail -n "${fail_lines}" "${out}" | while IFS= read -r l; do
             cprintf "%s<fg:red>%s</fg>\n" "${opad}" "${l}"
          done
       fi

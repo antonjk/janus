@@ -43,7 +43,7 @@ is added by the transpiler.
 #@ group [async[=N]]: <header text>
 #@ end
 
-#@ step [id=<id>] [depends=<id>,...]: <header text>
+#@ step [id=<id>] [depends=<id>,...] [success=<N>] [fail=<N>] [ok=<word>] [err=<word>]: <header text>
 <body ...>
 #@ end
 ```
@@ -51,6 +51,12 @@ is added by the transpiler.
 - Ends are **explicit**. Every `group` and `step` is closed by its own `#@ end`.
 - Groups **nest**. Steps are leaves and never nest.
 - `async` with no `=N` means unbounded concurrency within a batch; `async=N` caps it.
+- Per-step display overrides (all optional; fall back to global env defaults):
+  - `success=<N>` / `fail=<N>` — context lines to show on success / failure
+    (override `WHISPER_CONTEXT_SUCCESS` / `WHISPER_CONTEXT_FAIL`).
+  - `ok=<word>` / `err=<word>` — status word shown on success / failure
+    (override `WHISPER_OK_TEXT` / `WHISPER_ERR_TEXT`, default `OK` / `ERR`).
+    Single word only (the attribute list is space-separated).
 - Header text is a normal string; it is **expanded at registration time** (so
   `$(...)`, `${var}` in a header resolve in the lexical context where the directive
   appears).
