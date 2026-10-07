@@ -41,7 +41,7 @@ mkdir -p "$(dirname "${OUT}")"
 # ---------------------------------------------------------------------------------------------------------------------
 bundled_cprintf_inc() {
    awk '
-      /elif \[\[ -r "\$\{_CPRINTF_INC_DIR\}\/cprintf\/cprintf" \]\]; then/ { skip=1 }
+      /elif \[\[ -r "\$\{_CPRINTF_INC_DIR\}\/cprintf-full" \]\]; then/ { skip=1 }
       skip && /_CPRINTF_BACKEND="vendored"/ { skip=0; next }
       skip { next }
       { print }
