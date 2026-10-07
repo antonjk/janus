@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+########################################################################################################################
+# whisper-run — transpile an annotated script and run it with the whisper engine.
+#
+# Usage:
+#   whisper-run [--emit] <script> [args...]
+#
+# As a shebang interpreter:
+#   #!/usr/bin/env whisper-run
+#   ...annotated script...
+# then `./script` runs it under the engine. To debug sequentially, change the
+# shebang to `#!/usr/bin/env bash` and the #@ directives become inert comments.
+#
+# Flags (explicit invocation only; NOT valid in a shebang — env passes one arg):
+#   --emit      Print the transpiled script to stdout and exit (do not run).
+#   -h|--help   Show help.
+#
+# Transpilation (see DESIGN.md s5):
+#   #@ group: T                      -> whisper-group "T"
+#   #@ group async: T                -> whisper-group --async "T"
+#   #@ group async=N: T              -> whisper-group --async N "T"
+#   #@ step [id=X] [depends=a,b]: T   -> whisper-step [--id X] [--depends a,b] "T" <<DELIM
+#   <body...>                             <body...>
+#   #@ end  (closing a step)              DELIM
+#   #@ end  (closing a group)        -> whisper-group-end
+#
+# Heredoc delimiters are UNQUOTED (body expands at registration) and UNIQUE per step.
+########################################################################################################################
+
+set -o pipefail
+
+WHISPER_RUN_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+WHISPER_ROOT="$(cd "$(dirname "${WHISPER_RUN_SELF}")/.." && pwd)"
+WHISPER_INCLUDE="${WHISPER_ROOT}/include"
+
+die() { printf 'whisper-run: %s\n' "$*" >&2; exit 1; }
+
+# Quote a directive header for emission. A header is treated as a DOUBLE-QUOTED shell
+# context: we wrap it in double quotes verbatim and do NOT escape its contents, so
+# $(...)/${...}/backticks expand at registration AND any shell code the header
+# contains (e.g. a sed script with its own single-quoted "..." ) is preserved exactly.
+# Consequence (documented): a literal double-quote inside a header must be written
+# escaped by the author, exactly as in normal double-quoted shell.
+_wq() {
+   printf '"%s"' "$1"
+}
+
+usage() {
+   cat <<EOF
+Usage: whisper-run [--emit] <script> [args...]
+
+  --emit      Print the transpiled script to stdout and exit (do not run).
+  -h, --help  Show this help.
+
+Used as a shebang:  #!/usr/bin/env whisper-run
+EOF
+}
+
+# -------------------------------------------------------------------------------------------------
+# Arg parsing: file-vs-flag detection. First non-flag arg is the target script;
+# everything after it is forwarded to the script as its own "$@".
+# -------------------------------------------------------------------------------------------------
+EMIT=0
+SCRIPT=""
+declare -a SCRIPT_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+   case "$1" in
+      --emit)      EMIT=1; shift ;;
+      -h|--help)   usage; exit 0 ;;
+      --)          shift; SCRIPT="$1"; shift; SCRIPT_ARGS=("$@"); break ;;
+      -*)          die "unknown flag: $1 (flags are not allowed in a shebang)" ;;
+      *)           SCRIPT="$1"; shift; SCRIPT_ARGS=("$@"); break ;;
+   esac
+done
+
+[[ -n "${SCRIPT}" ]] || { usage >&2; exit 2; }
+[[ -r "${SCRIPT}" ]] || die "cannot read script: ${SCRIPT}"
+
+# -------------------------------------------------------------------------------------------------
+# Transpiler
+#
+# Reads the annotated script on stdin, writes the transpiled script on stdout.
+# Maintains an explicit open-block stack so a given `#@ end` resolves to either a
+# step-heredoc close or a group close.
+# -------------------------------------------------------------------------------------------------
+transpile() {
+   local src="$1"
+   local -a stack=()          # stack of open blocks: "group" or "step:DELIM"
+   local uid=0
+   local injected_prologue=0
+   local line trimmed directive rest
+
+   while IFS= read -r line || [[ -n "${line}" ]]; do
+      # Detect the leading shebang on the very first line: rewrite to bash and inject
+      # the runtime source right after it.
+      if (( injected_prologue == 0 )) && [[ "${line}" == '#!'* ]]; then
+         printf '#!/usr/bin/env bash\n'
+         printf '# --- transpiled by whisper-run from %s ---\n' "${src}"
+         printf 'source %q/trap.inc\n' "${WHISPER_INCLUDE}"
+         printf 'source %q/temp.inc\n' "${WHISPER_INCLUDE}"
+         printf 'source %q/cprintf.inc\n' "${WHISPER_INCLUDE}"
+         printf 'source %q/spinner.inc\n' "${WHISPER_INCLUDE}"
+         printf 'source %q/whisper.inc\n' "${WHISPER_INCLUDE}"
+         injected_prologue=1
+         continue
+      fi
+
+      # Is this a directive line?  (optional leading whitespace, then `#@`)
+      trimmed="${line#"${line%%[![:space:]]*}"}"      # strip leading whitespace
+      if [[ "${trimmed}" == '#@'* ]]; then
+         directive="${trimmed#\#@}"
+         directive="${directive#"${directive%%[![:space:]]*}"}"  # strip ws after #@
+
+         case "${directive}" in
+            group*)
+               # group [async[=N]]: header
+               local spec="${directive#group}"
+               spec="${spec%%:*}"                       # between 'group' and ':'
+               local header="${directive#*:}"
+               header="${header#"${header%%[![:space:]]*}"}"
+               local async_arg=""
+               if [[ "${spec}" == *async=* ]]; then
+                  local n="${spec#*async=}"; n="${n%%[![:space:]0-9]*}"
+                  async_arg="--async=${n}"
+               elif [[ "${spec}" == *async* ]]; then
+                  async_arg="--async"
+               fi
+               if [[ -n "${async_arg}" ]]; then
+                  printf 'whisper-group %s %s\n' "${async_arg}" "$(_wq "${header}")"
+               else
+                  printf 'whisper-group %s\n' "$(_wq "${header}")"
+               fi
+               stack+=("group")
+               ;;
+            step*)
+               # step [id=X] [depends=a,b]: header
+               local spec="${directive#step}"
+               spec="${spec%%:*}"
+               local header="${directive#*:}"
+               header="${header#"${header%%[![:space:]]*}"}"
+               local id_arg="" dep_arg=""
+               # tokenise spec for id= / depends=
+               local tok
+               for tok in ${spec}; do
+                  case "${tok}" in
+                     id=*)      id_arg="--id ${tok#id=}" ;;
+                     depends=*) dep_arg="--depends ${tok#depends=}" ;;
+                  esac
+               done
+               uid=$(( uid + 1 ))
+               local delim="WHISPER_STEP_${uid}"
+               # Build the whisper-step call. Unquoted heredoc delimiter => body
+               # expands at registration.
+               printf 'whisper-step'
+               [[ -n "${id_arg}" ]]  && printf ' %s' "${id_arg}"
+               [[ -n "${dep_arg}" ]] && printf ' %s' "${dep_arg}"
+               printf ' %s <<%s\n' "$(_wq "${header}")" "${delim}"
+               stack+=("step:${delim}")
+               ;;
+            end)
+               # Close the most recent open block.
+               (( ${#stack[@]} > 0 )) || die "unmatched '#@ end' in ${src}"
+               local top="${stack[-1]}"
+               unset 'stack[-1]'
+               if [[ "${top}" == step:* ]]; then
+                  printf '%s\n' "${top#step:}"          # close the heredoc
+               else
+                  printf 'whisper-group-end\n'
+               fi
+               ;;
+            *)
+               # Unknown directive -> pass through as a comment (keeps it inert).
+               printf '%s\n' "${line}"
+               ;;
+         esac
+         continue
+      fi
+
+      # Non-directive line: pass through verbatim (it is either driver code or a
+      # step body, both of which must be emitted as-is).
+      printf '%s\n' "${line}"
+   done <"${src}"
+
+   (( ${#stack[@]} == 0 )) || die "unclosed block(s) at EOF in ${src}: ${stack[*]}"
+
+   # If the source had no shebang, we still need the prologue.
+   # (Handled below by the caller for the emit/run split.)
+
+   # Epilogue: run the registered tree.
+   printf 'whisper-exec\n'
+}
+
+# If the script had no shebang at all, the prologue was never injected. Detect and
+# prepend it. Simplest: check first line.
+needs_prologue() {
+   local first; IFS= read -r first <"$1" || true
+   [[ "${first}" != '#!'* ]]
+}
+
+emit_transpiled() {
+   if needs_prologue "${SCRIPT}"; then
+      printf '#!/usr/bin/env bash\n'
+      printf '# --- transpiled by whisper-run from %s (no shebang in source) ---\n' "${SCRIPT}"
+      printf 'source %q/trap.inc\n'    "${WHISPER_INCLUDE}"
+      printf 'source %q/temp.inc\n'    "${WHISPER_INCLUDE}"
+      printf 'source %q/cprintf.inc\n' "${WHISPER_INCLUDE}"
+      printf 'source %q/spinner.inc\n' "${WHISPER_INCLUDE}"
+      printf 'source %q/whisper.inc\n' "${WHISPER_INCLUDE}"
+   fi
+   # transpile() injects the prologue itself only when it sees a shebang on line 1;
+   # with no shebang it emits none, which is why we injected it above.
+   transpile "${SCRIPT}"
+}
+
+if (( EMIT )); then
+   emit_transpiled
+   exit 0
+fi
+
+# Run: transpile to a temp file, then execute it with the forwarded args.
+TMP_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/whisper-run.XXXXXX")" || die "mktemp failed"
+trap 'rm -f "${TMP_SCRIPT}"' EXIT
+emit_transpiled >"${TMP_SCRIPT}" || die "transpilation failed"
+
+bash "${TMP_SCRIPT}" "${SCRIPT_ARGS[@]}"
+exit $?

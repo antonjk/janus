@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+########################################################################################################################
+## Colored Printf (cprintf) - Formatted output with colors and styles
+##
+## Provides printf-like functionality with XML-style markup for colors and text formatting.
+## Supports nested tags, multiple color formats, comprehensive text effects, and inline modifiers.
+## Output goes to stdout (cprintf) or stderr (ceprintf).
+##
+## Color Support:
+##   Named colors: black, red, green, yellow, blue, magenta, cyan, white, default
+##   Single letters: a=black, b=red, c=green, d=yellow, e=blue, f=magenta, g=cyan, h=white, x=default
+##   Uppercase letters: A-H for bright versions (A=bright black, B=bright red, etc.)
+##   Numeric codes: 0-7 (standard), 8-15 (bright), 16-255 (256-color), >255 (true color)
+##
+## Inline Effect Modifiers (can be combined):
+##   +  High intensity/bright colors (e.g., red+, blue+, A+)
+##   -  Dim/low intensity colors (e.g., red-, blue-, a-)
+##   !  Bold text effect (e.g., red!, blue!)
+##   *  Italic text effect (e.g., red*, blue*)
+##   _  Underlined text effect (e.g., red_, blue_)
+##   ~  Inverted/reverse video effect (e.g., red~, blue~)
+##   =  Strikethrough text effect (e.g., red=, blue=)
+##
+## Modifier Combinations:
+##   Multiple modifiers can be combined: red+!* (bright red bold italic)
+##   Order doesn't matter: red*! same as red!*
+##   Works with all color formats: 196!_, A+~, cyan*_=
+##
+## Markup Tags (nestable):
+##   <fg:color></fg>     - Foreground color (supports all color formats and modifiers)
+##   <bg:color></bg>     - Background color (supports all color formats and modifiers)
+##   <b></b>             - Bold text
+##   <i></i>             - Italic text
+##   <u></u>             - Underlined text
+##   <dim></dim>         - Dim/faint text
+##   <inv></inv>         - Inverted/reverse video text
+##   <strike></strike>   - Strikethrough text
+##
+## Special Characters:
+##   &lt;  - Literal '<' character
+##   &gt;  - Literal '>' character
+##
+## Color Spaces Supported:
+##   - Standard ANSI (0-7): Basic 8 colors
+##   - High intensity ANSI (8-15): Bright versions of basic colors
+##   - 256-color palette (16-255): Extended color set
+##   - True color (>255): 24-bit RGB colors
+##
+## Usage Examples:
+##   cprintf "<fg:red>Error:</fg> <b>%s</b>\n" "File not found"
+##   cprintf "<bg:yellow><fg:black>Warning</fg></bg>: %s\n" "Low disk space"
+##   ceprintf "<fg:red+><b>CRITICAL:</b></fg> System failure\n"
+##   cprintf "<fg:196!_>Bold underlined 256-color red</fg>\n"
+##   cprintf "<fg:blue*~>Italic inverted blue text</fg>\n"
+##   cprintf "<fg:red=*>Strikethrough italic red text</fg>\n"
+########################################################################################################################
+# If the file is sourced, prevent it from getting sourced multiple times
+[[ "$0" != "${BASH_SOURCE[0]}" && -n "${__CPRINTF_INC_SOURCED__:-}" ]] && return
+[[ "$0" != "${BASH_SOURCE[0]}" ]] && __CPRINTF_INC_SOURCED__=1
+
+# Get script directory (handle symlinks)
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+    SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+##################################################################################
+# INCLUDES - Start
+##################################################################################
+. "$SCRIPT_DIR/cprintf-ansi.inc"
+
+# Aliases
+. "$SCRIPT_DIR/cprintf-color-aliases.inc"
+
+# Processor
+. "$SCRIPT_DIR/cprintf-colorize.inc"
+
+. "$SCRIPT_DIR/cprintf-style-sets.inc"
+
+option_prefix="${SCRIPT_DIR}"/cprintf-opt-
+OPT_HELP=""
+for file in "${option_prefix}"*.inc; do
+    header_text="$(grep '^#[?]' "$file" 2>/dev/null | sed 's/^#\?//; s/^[[:space:]]*//' | head -1)"
+    OPT_HELP="${OPT_HELP}\n   --${file:${#option_prefix}:-4}\n     ${header_text}\n"
+    . "${file}"
+done
+##################################################################################
+# INCLUDES - End
+##################################################################################
+
+cprintf::show-help() {
+    cprintf "<fg:white+><b>NAME</b></fg>
+
+    ${0##*/} - formatted output with colors and text effects
+
+<fg:white+><b>USAGE</b></fg>
+
+    ${0##*/} [options] format [arguments...]
+
+<fg:white+><b>DESCRIPTION</b></fg>
+
+    Output text with colors and effects.
+
+<fg:white+><b>OPTIONS</b></fg>
+${OPT_HELP}
+    -h --help
+       Display this message
+\n"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Formatted output with color and style markup to stdout.
+#
+# Printf-compatible function that processes XML-style markup tags for colors and text formatting
+# before outputting to stdout. Supports all printf format specifiers, inline color modifiers,
+# and nested markup tags. Markup processing is handled by colorize() function.
+#
+# Processing Order:
+#   1. First argument is processed for markup tags and converted to ANSI codes
+#   2. Inline modifiers in color tags are processed (e.g., <fg:red!*>)
+#   3. Resulting template is passed to printf with remaining arguments
+#   4. Output is sent to stdout (file descriptor 1)
+#
+# Arguments:
+#   $1 - Format string with markup tags (required)
+#   $2+ - Arguments for printf formatting (optional)
+#
+# Returns:
+#   Exit status of printf command (0 on success)
+#
+# Examples:
+#   cprintf "<fg:red>Error:</fg> <b>%s</b>\n" "File not found"
+#   cprintf "<bg:yellow><fg:black>Warning</fg></bg>: %d items\n" 42
+#   cprintf "<fg:red!*>Bold italic red text</fg>\n"
+#   cprintf "<fg:196_~>Underlined inverted 256-color</fg>\n"
+#   cprintf "<fg:blue=*>Strikethrough italic blue</fg>\n"
+#-----------------------------------------------------------------------------------------------------------------------
+function cprintf() {
+    local template
+    local arg=""
+    [[ "$1" == "--" ]] && arg="--" && shift
+    template="$(cprintf::colorize "$1")"
+    #template="$1"
+    shift
+    printf -- $arg "${template}" "$@"
+}
+
+# If we are not sourced, run
+[[ "$0" != "${BASH_SOURCE[0]}" ]] && return
+
+if [[ $# -eq 0 && ! -t 0 ]]; then
+    while IFS= read -r line; do
+        cprintf "${line}\n"
+    done
+    exit 0
+fi
+# Show help if no arguments or --help
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case "$key" in
+        -h | --help)
+            cprintf::show-help
+            exit 0
+            ;;
+        --)
+            break
+            ;;
+        --*)
+            function_name="cprintf::opt::${key:2}"
+            if declare -f "$function_name" >/dev/null; then
+                shift
+                "$function_name" "$@"
+                exit
+            fi
+            break
+            ;;
+        *)
+            break
+            ;;
+    esac
+    shift
+done
+if [[ $# -eq 0 ]]; then
+    echo "cprintf - formatted output with colors and text effects"
+    echo "Usage: cprintf [options] format [arguments...]"
+    echo "'cprintf -h' for options."
+    echo "See 'man cprintf' for complete documentation"
+    exit 0
+fi
+cprintf "$@"
+printf "%b[0m" "${ANSI_ESC}"
