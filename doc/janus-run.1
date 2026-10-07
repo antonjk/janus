@@ -1,0 +1,206 @@
+.TH JANUS-RUN 1 "2026-10-07" "janus 1.0" "User Commands"
+.SH NAME
+janus-run \- run an annotated shell script with concurrent, grouped, progress-tracked steps
+.SH SYNOPSIS
+.B janus-run
+[\fB\-\-emit\fR]
+.I script
+[\fIargs\fR...]
+.br
+.B #!/usr/bin/env janus-run
+.RI "(as a shebang interpreter)"
+.SH DESCRIPTION
+.B janus-run
+executes an ordinary shell script that has been annotated with
+.B #@
+comment directives. The directives define a tree of
+.B groups
+(branches) and
+.B steps
+(leaves); janus runs the steps with concurrency, a live progress spinner, grouped
+output, and per-step status.
+.PP
+The run mode is selected by the script's
+.BR shebang ,
+so the invocation is always the same
+.RB ( "./script" ):
+.TP
+.B #!/usr/bin/env janus-run
+The kernel execs
+.BR "janus-run /abs/path/script [args...]" .
+janus transpiles the directives and runs them with the engine.
+.TP
+.B #!/usr/bin/env bash
+The
+.B #@
+lines are inert comments; the script runs top\-to\-bottom, sequentially. This is the
+debugging / plain\-shell mode. To debug an annotated script, change the one shebang
+line to bash.
+.PP
+The annotated source never contains janus runtime calls; the runtime wiring is added
+by the transpiler.
+.SH OPTIONS
+.TP
+.B \-\-emit
+Print the transpiled script to standard output and exit (do not run). Useful for
+debugging the transpilation. Flags are explicit\-invocation only and must NOT appear
+in a shebang (\fB/usr/bin/env\fR passes at most one argument).
+.TP
+.B \-h, \-\-help
+Display help and exit.
+.SH ANNOTATION GRAMMAR
+Directives are shell comments beginning with
+.BR #@ .
+Every
+.B group
+and
+.B step
+is closed by its own
+.BR "#@ end" .
+Groups nest; steps are leaves and never nest.
+.TP
+.B #@ group [async[=N]]: <header>
+Open a group. Without
+.BR async ,
+children run sequentially. With
+.B async
+(optionally capped at
+.BR N )
+a maximal run of adjacent steps runs concurrently.
+.TP
+.B #@ step [id=X] [depends=a,b] [success=N] [fail=N] [ok=WORD] [err=WORD]: <header>
+Open a step. The lines until the matching
+.B #@ end
+are the step body.
+.TP
+.B #@ end
+Close the most recent open step or group.
+.PP
+Header text and step bodies are
+.B expanded at registration time
+in the lexical context where the directive appears, so
+.BR $(...) ,
+.BR ${var} ,
+and loop variables resolve per iteration.
+.SS Step attributes
+.TP
+.B id=X
+Explicit step id.
+.TP
+.B depends=a,b
+Declared dependency on sibling step ids.
+.B Parsed but not enforced
+in this version.
+.TP
+.B success=N
+Context (trailing output) lines to show on success. Overrides
+.BR JANUS_CONTEXT_SUCCESS .
+.TP
+.B fail=N
+Context lines to show on failure. Overrides
+.BR JANUS_CONTEXT_FAIL .
+.TP
+.B ok=WORD
+Status word shown on success (single word). Overrides
+.BR JANUS_OK_TEXT .
+.TP
+.B err=WORD
+Status word shown on failure (single word). Overrides
+.BR JANUS_ERR_TEXT .
+.SH EXECUTION SEMANTICS
+A group processes its children in registration order. A maximal run of adjacent
+steps forms one concurrent batch (bounded by
+.BR async=N ;
+a sync group runs each step singly). A nested group is a
+.BR barrier :
+the preceding batch finishes before the group starts, and the group finishes before
+the following batch starts. Within a batch, steps are launched concurrently but
+reported one at a time in registration order; the spinner animates whichever step is
+currently being waited on.
+.SH EXAMPLE
+.nf
+#!/usr/bin/env janus-run
+#@ group async: outer
+    #@ step: step 1
+    echo "working"; sleep 1
+    #@ end
+    #@ step: step 2
+    make -j4
+    #@ end
+    #@ group async=10: per package
+    for pkg in */; do
+        #@ step: ${pkg%/}
+        ( cd "${pkg}" && build.sh )
+        #@ end
+    done
+    #@ end
+#@ end
+.fi
+.SH ENVIRONMENT
+.TP
+.B JANUS_CONTEXT_SUCCESS
+Default trailing output lines shown on step success (default: 2).
+.TP
+.B JANUS_CONTEXT_FAIL
+Default trailing output lines shown on step failure (default: 25).
+.TP
+.B JANUS_OK_TEXT
+Default success status word (default: OK).
+.TP
+.B JANUS_ERR_TEXT
+Default failure status word (default: ERR).
+.TP
+.B JANUS_INDENT
+Spaces of indentation per nesting level (default: 2).
+.TP
+.B JANUS_SPINNER
+Spinner glyph set (default: wave-bars). See the spinner module for names.
+.TP
+.B JANUS_SPINNER_AREA
+Visible width in columns reserved for the spinner (default: 5).
+.SH EXIT STATUS
+.TP
+.B 0
+All steps succeeded.
+.TP
+.B 1
+One or more steps failed, or a transpilation / usage error occurred.
+.SH FILES
+.TP
+.I bin/janus-run
+Transpiler and interpreter (development tree; sources the runtime from
+.IR include/ ).
+.TP
+.I include/janus.inc
+Runtime: registry and the group/step execution engine.
+.TP
+.I dist/janus
+Standalone single\-file build (produced by
+.BR "make build" );
+the runtime is inlined, so no
+.I include/
+directory is required.
+.SH NOTES
+.IP \(bu 2
+The runtime requires Bash 4+ (uses
+.BR "wait -n" ,
+associative patterns, etc.). The transpiler itself also runs under Bash 3.2.
+.IP \(bu 2
+Color is provided by
+.B cprintf
+when available on
+.BR PATH ,
+otherwise output falls back to plain text with markup stripped.
+.IP \(bu 2
+Step bodies use unquoted here\-documents, so a literal
+.B $
+in a body must be escaped as
+.BR \e$ .
+.SH SEE ALSO
+.BR bash (1),
+.BR printf (1),
+.BR make (1)
+.SH AUTHOR
+Written by Anton Koekemoer.
+.SH COPYRIGHT
+MIT License \- see LICENSE file for details.
