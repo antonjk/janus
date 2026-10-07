@@ -260,7 +260,7 @@ reaps running step children; `temp.inc` removes the spool dir.
 ## 8. Proposed workspace layout
 
 ```
-/Users/akoekemo/workplace/Janus/
+/Users/akoekemo/workplace/Personal/janus/
   DESIGN.md
   bin/
     janus-run          # transpiler + driver (--emit to print transpiled script)
