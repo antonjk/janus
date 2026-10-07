@@ -6,12 +6,12 @@ _CPRINTF_INC_SOURCED=1
 #
 # Provides `cprintf` / `ceprintf` (printf with <fg:...>, <b>, etc. markup). Resolution order:
 #   1. A `cprintf` already on PATH (e.g. a system install of antonjk/bash-cprintf).
-#   2. The vendored single-file build at include/cprintf-full (sourced as a library).
+#   2. The vendored single-file build at include/cprintf-lib (sourced as a library).
 #   3. A plain-printf stub that strips `<...>` markup, so the engine never hard-fails
 #      on formatting even where cprintf is unavailable.
 #
 # Upstream: https://github.com/antonjk/bash-cprintf (MIT). We vendor only the built
-# single-file artifact (cprintf-full); see include/cprintf-full.LICENSE.
+# single-file artifact (cprintf-lib); see include/cprintf-lib.LICENSE.
 ########################################################################################################################
 
 _CPRINTF_INC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,10 +22,10 @@ if command -v cprintf >/dev/null 2>&1; then
    # shellcheck disable=SC1090
    . "$(command -v cprintf)"
    _CPRINTF_BACKEND="path"
-elif [[ -r "${_CPRINTF_INC_DIR}/cprintf-full" ]]; then
+elif [[ -r "${_CPRINTF_INC_DIR}/cprintf-lib" ]]; then
    # (2) Vendored single-file build.
    # shellcheck disable=SC1090
-   . "${_CPRINTF_INC_DIR}/cprintf-full"
+   . "${_CPRINTF_INC_DIR}/cprintf-lib"
    _CPRINTF_BACKEND="vendored"
 else
    _CPRINTF_BACKEND="stub"

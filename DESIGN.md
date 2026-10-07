@@ -283,10 +283,10 @@ reaps running step children; `temp.inc` removes the spool dir.
 1. ~~`depends` in v1~~ — **DECIDED: (a) parse-but-ignore** for v1 (see §7).
 2. ~~Includes: port vs. source~~ — **DECIDED:** `temp.inc`, `trap.inc`, `spinner.inc`
    are **ported/copied** into `include/`. Color is provided by **vendoring upstream
-   `cprintf`** (antonjk/bash-cprintf, MIT, commit `bf33ebf`) into `include/cprintf-full`
-   (single-file build cprintf-full + its LICENSE). Janus's own thin
+   `cprintf`** (antonjk/bash-cprintf, MIT, commit `bf33ebf`) into `include/cprintf-lib`
+   (single-file `lib` build + its LICENSE). Janus's own thin
    `include/cprintf.inc` wrapper resolves color in this order: (1) a `cprintf` on
-   `PATH`, (2) the vendored `include/cprintf-fullcprintf`, (3) a plain-`printf` stub that
+   `PATH`, (2) the vendored `include/cprintf-lib`, (3) a plain-`printf` stub that
    strips `<...>` markup — so the engine never hard-fails on formatting and the
    workspace runs anywhere (it is not currently installed on this machine).
 3. ~~`command`-builtin shadowing~~ — **MOOT:** legacy emitters are dropped. `janus.inc`
