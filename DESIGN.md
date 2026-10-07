@@ -17,9 +17,6 @@ which mirrors the engine's group **barriers** (a nested group is a gate the run
 passes through between batches), and over **transitions**, which mirrors steps moving
 from pending → running → done. One file, two faces, gated transitions — Janus.
 
-(Earlier working name: *Whisper*. Renamed to avoid collision with the widely known
-OpenAI Whisper and to pick a name whose meaning matches the tool's behaviour.)
-
 ## 1. Goal
 
 Write an ordinary Bash script, annotate it with `#@` comment directives, and get
