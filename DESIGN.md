@@ -208,15 +208,22 @@ subshells (`( ... )`). Reuse `temp.inc` (`temp_file`, EXIT cleanup of `/tmp/PID-
 ```
 /tmp/PID-$$/janus/
   tree                 # append-only, one record per node
-  step.<uid>.body      # captured (already expanded) step body
   step.<uid>.out       # runtime stdout+stderr for that step
 ```
+
+Each step body is captured not as a file but as a uniquely-named shell **function**
+`_janus_fn_<uid>`, defined (via `eval`) at registration from the already-expanded
+heredoc body. The engine runs each step by calling its function in a **forked
+subshell**, so the body inherits the annotated script's own functions, `source`d
+includes, and shell variables, while its writes stay isolated from the engine and
+sibling steps. Per-iteration loop values bake into each function because a fresh
+`_janus_fn_<uid>` is defined per registration.
 
 `tree` record format (one line): `TYPE|depth|id|meta|header`
 
 ```
 GROUP|0|g1|async=10|Rebase Packages...
-STEP|1|s2|depends=|release-Foo
+STEP|1|s2|depends=;fn=_janus_fn_s2|release-Foo
 GROUP_END|0|g1||
 ```
 
@@ -227,11 +234,12 @@ immune to subshell scoping.
 
 - `janus-group [--async[=N]] "<header>"` — append a GROUP record, push onto a depth stack.
 - `janus-group-end` — append a GROUP_END record, pop the depth stack.
-- `janus-step [--id X] [--depends a,b] "<header>"` — read stdin (the heredoc body)
-  into `step.<uid>.body`, append a STEP record. **Does not execute.**
-- `janus-exec` — parse `tree`, walk it per §4, run step bodies with concurrency,
-  spinner (`spinner.inc`), and colored status (`cprintf.inc`); print per-step
-  success/fail context (tail of `step.<uid>.out`).
+- `janus-step [--id X] [--depends a,b] "<header>"` — read stdin (the heredoc body),
+  define it as a fresh function `_janus_fn_<uid>`, append a STEP record carrying the
+  function name in `meta` (`fn=...`). **Does not execute.**
+- `janus-exec` — parse `tree`, walk it per §4, run each step's function in a forked
+  subshell with concurrency, spinner (`spinner.inc`), and colored status
+  (`cprintf.inc`); print per-step success/fail context (tail of `step.<uid>.out`).
 
 ### Engine (janus-exec) — pseudocode
 

@@ -127,12 +127,20 @@ janus-step() {
    header="$1"
    local uid="s$(( ++_JANUS_UID ))"
    [[ -z "${id}" ]] && id="${uid}"
-   local spool; spool="$(_janus_spool)"
-   # Capture the body (heredoc on stdin). Expansion already happened at registration
-   # because the transpiler uses an UNQUOTED heredoc delimiter.
-   cat >"${spool}/step.${uid}.body"
+   # Read the body (heredoc on stdin). The transpiler uses an UNQUOTED heredoc, so
+   # loop variables and $(...) are already expanded for THIS registration — baking
+   # per-iteration values in. Define a uniquely-named function carrying that body.
+   # The engine later calls this function in a forked subshell, so the body has full
+   # access to the script's own functions, sourced includes, and shell variables.
+   local body; body="$(cat)"
+   local fn="_janus_fn_${uid}"
+   # The leading/trailing newlines keep a lone leading comment or trailing `}` safe.
+   eval "${fn}() {
+${body}
+}"
    # Meta is a ';'-separated kv list; empty values mean "use the global default".
-   local meta="depends=${depends};success=${succ};fail=${fail};ok=${ok};err=${err}"
+   # The function name travels in meta as fn=... so the engine knows what to call.
+   local meta="depends=${depends};success=${succ};fail=${fail};ok=${ok};err=${err};fn=${fn}"
    _janus_record "STEP|${_JANUS_DEPTH}|${uid}|${meta}|${header}"
 }
 
@@ -314,9 +322,12 @@ _janus_run_batch() {
          (( running >= cap )) && break
          local idx="${steps[$launched]}"
          local uid="${_WT_ID[$idx]}"
-         local body="${spool}/step.${uid}.body"
+         local fn; fn="$(_janus_meta_get "${_WT_META[$idx]}" fn)"
          local out="${spool}/step.${uid}.out"
-         ( bash "${body}" ) >"${out}" 2>&1 &
+         # Run the step's function in a FORKED SUBSHELL: it inherits the script's
+         # functions, sourced includes, and shell variables, while writes stay
+         # isolated from the engine and siblings.
+         ( "${fn}" ) >"${out}" 2>&1 &
          step_pid[$launched]="$!"
          launched=$(( launched + 1 ))
       done

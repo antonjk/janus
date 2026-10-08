@@ -124,6 +124,13 @@ starts, and the group finishes before the following batch starts. Within a batch
 steps launch concurrently but are reported one at a time in registration order; the
 spinner animates whichever step is currently being waited on.
 
+Each step body runs in a **forked subshell of your script**, so a step can call
+functions you defined in the script, use `source`d custom includes, and read the
+script's variables. The subshell inherits the script's `set` options and
+environment; a step's own changes stay isolated from the engine and other steps.
+Loop-varying values are captured per iteration (a `#@ step` inside a `for` loop
+registers one step per pass with that pass's values baked in).
+
 ## Environment variables
 
 | Variable                 | Purpose                                   | Default     |

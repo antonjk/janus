@@ -192,6 +192,15 @@ when available on
 .BR PATH ,
 otherwise output falls back to plain text with markup stripped.
 .IP \(bu 2
+Each step runs in a
+.B forked subshell of the annotated script,
+so a step body may call functions defined in the script, use
+.B source
+d includes, and read the script's shell variables. The subshell also inherits the
+script's
+.B set
+options and environment; a step's writes do not affect the engine or sibling steps.
+.IP \(bu 2
 Step bodies use unquoted here\-documents, so a literal
 .B $
 in a body must be escaped as
