@@ -42,10 +42,19 @@ same file runs the two commands sequentially with the `#@` lines ignored.
 
 ## Installation
 
+### Homebrew (recommended)
+
+```bash
+brew install antonjk/tap/janus
+```
+
+This also installs [`cprintf`](https://github.com/antonjk/bash-cprintf) for colored
+output.
+
 ### From source (development tree)
 
 ```bash
-git clone <repo-url> janus
+git clone https://github.com/antonjk/janus.git
 cd janus
 ./bin/janus-run examples/nested-async.sh      # run directly from the tree
 ```
