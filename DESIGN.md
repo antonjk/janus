@@ -133,7 +133,7 @@ janus-run /abs/path/script.sh [script-args...]
   (`janus-run --emit script.sh`).
 - **Argument forwarding (required).** Everything after the target script path is
   forwarded into the transpiled script as its own `$@`. So an annotated script can
-  take its own CLI arguments (as `whisper-build` forwards `brazil-build-options`).
+  take its own CLI arguments and flags.
   Under `bash script.sh args` this is free; as an interpreter `janus-run` must do it
   explicitly.
 - **No flags in the shebang.** `#!/usr/bin/env` passes **at most one** argument
@@ -167,38 +167,55 @@ Rules:
 - The original annotated file is never modified; transpilation targets a temp file
   (or stdout under `--emit`).
 
-### Transpiled form of the rebase example
+### Transpiled form (worked example)
 
-The annotated source begins with `#!/usr/bin/env janus-run`. `janus-run`
-transpiles it to the following Bash and executes that (the shebang is rewritten to
-`bash`, the runtime is sourced, `janus-exec` is appended, and the script's own
-args are available as `$@`):
+Given this annotated source (shebang `#!/usr/bin/env janus-run`):
+
+```bash
+#!/usr/bin/env janus-run
+#@ group: Prepare
+    #@ step: $(date +%Y-%m-%d)
+    mkdir -p build
+    #@ end
+#@ end
+
+#@ group async=4: Process files
+for f in src/*.txt; do
+    #@ step: ${f##*/}
+    process "${f}"
+    #@ end
+done
+#@ end
+```
+
+`janus-run` transpiles it to the following Bash and executes that (the shebang is
+rewritten to `bash`, the runtime is sourced, `janus-exec` is appended, and the
+script's own args are available as `$@`):
 
 ```bash
 #!/usr/bin/env bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/include/cprintf.inc"
-source "${SCRIPT_DIR}/include/janus.inc"   # injected
+# runtime sourced here (dev: source include/*.inc; bundled: inlined)
 
-cd "$(brazil-context workspace root)/src"
-
-janus-group "Sync Versionset Metadata"
-  janus-step "$(cat ../packageInfo | grep "versionSet" | sed 's/[^=]*=[^"]*"\([^"]*\)";/\1/g')" <<STEP_BODY_1
-brazil ws sync --md
+janus-group "Prepare"
+  janus-step "$(date +%Y-%m-%d)" <<STEP_BODY_1
+mkdir -p build
 STEP_BODY_1
 janus-group-end
 
-janus-group --async 10 "Rebase Packages..."
-for file in */; do
-  janus-step "${file//\/}" <<STEP_BODY_2
-cd "${file}"
-git-stash-and-rebase.sh
+janus-group --async=4 "Process files"
+for f in src/*.txt; do
+  janus-step "${f##*/}" <<STEP_BODY_2
+process "${f}"
 STEP_BODY_2
 done
 janus-group-end
 
 janus-exec   # injected
 ```
+
+The sync group's header is a command substitution that resolves at registration;
+the async group's `#@ step` sits inside a `for` loop, so it registers one step per
+file with `${f}` baked in per iteration.
 
 ## 6. Runtime (registry + engine)
 
@@ -297,7 +314,6 @@ reaps running step children; `temp.inc` removes the spool dir.
     spinner.inc          # spinner                    (ported/reused)
     cprintf.inc          # colored output             (ported/reused)
   examples/
-    rebase.sh            # annotated version of whisper-rebase
     nested-async.sh      # the §4 worked example
   test/
     ...                  # transpiler + engine tests
