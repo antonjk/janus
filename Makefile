@@ -2,8 +2,9 @@ PREFIX ?= /usr/local
 BIN_DIR = $(PREFIX)/bin
 MAN_DIR = $(PREFIX)/share/man/man1
 DIST    = dist/janus
+DEV_BIN ?= $(HOME)/.dev/bin
 
-.PHONY: build install uninstall clean test
+.PHONY: build install uninstall clean test dev dev-clean
 
 # Build the standalone single-file janus into dist/janus.
 build:
@@ -35,3 +36,17 @@ clean:
 # Run the full test suite against the development tree.
 test:
 	@bash test/run-all.sh
+
+# Build the bundle and symlink it into the dev-override dir ($(DEV_BIN), kept first
+# on PATH) as `janus`, shadowing any installed janus. Re-run after changes to pick up
+# a fresh build. Use `make dev-clean` to drop the override and fall back to the
+# installed janus.
+dev: build
+	@mkdir -p "$(DEV_BIN)"
+	@ln -sf "$(abspath $(DIST))" "$(DEV_BIN)/janus"
+	@echo "Dev janus linked: $(DEV_BIN)/janus -> $(abspath $(DIST))"
+	@case ":$$PATH:" in *":$(DEV_BIN):"*) ;; *) echo "WARNING: $(DEV_BIN) is not on PATH; add it (first) so the dev build is picked up." ;; esac
+
+dev-clean:
+	@rm -f "$(DEV_BIN)/janus"
+	@echo "Removed dev override $(DEV_BIN)/janus (installed janus, if any, is active again)."
