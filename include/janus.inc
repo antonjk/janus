@@ -138,6 +138,14 @@ janus-step() {
    eval "${fn}() {
 ${body}
 }"
+   # Also persist the exact same captured body to disk. If janus-step ran inside a
+   # subshell (e.g. the right side of a pipe, as in `cmd | while read ... done`),
+   # the function above dies with that subshell and is NOT visible when janus-exec
+   # runs in the main shell. In that case the engine falls back to sourcing this
+   # file (see _janus_run_batch), which still executes in a forked subshell of the
+   # engine and therefore keeps access to the script's functions and includes.
+   local spool; spool="$(_janus_spool)"
+   printf '%s\n' "${body}" >"${spool}/step.${uid}.body"
    # Meta is a ';'-separated kv list; empty values mean "use the global default".
    # The function name travels in meta as fn=... so the engine knows what to call.
    local meta="depends=${depends};success=${succ};fail=${fail};ok=${ok};err=${err};fn=${fn}"
@@ -324,10 +332,19 @@ _janus_run_batch() {
          local uid="${_WT_ID[$idx]}"
          local fn; fn="$(_janus_meta_get "${_WT_META[$idx]}" fn)"
          local out="${spool}/step.${uid}.out"
-         # Run the step's function in a FORKED SUBSHELL: it inherits the script's
-         # functions, sourced includes, and shell variables, while writes stay
-         # isolated from the engine and siblings.
-         ( "${fn}" ) >"${out}" 2>&1 &
+         local body="${spool}/step.${uid}.body"
+         # Run the step in a FORKED SUBSHELL so it inherits the script's functions,
+         # sourced includes, and variables while its writes stay isolated.
+         #   - If the step's function is visible in this shell, call it (normal case).
+         #   - Otherwise the step was registered inside a subshell (e.g. the right
+         #     side of a pipe), so its function died with that subshell; fall back to
+         #     SOURCING the captured body in a forked subshell of the engine, which
+         #     still runs in the main shell's context.
+         if declare -F "${fn}" >/dev/null 2>&1; then
+            ( "${fn}" ) >"${out}" 2>&1 &
+         else
+            ( source "${body}" ) >"${out}" 2>&1 &
+         fi
          step_pid[$launched]="$!"
          launched=$(( launched + 1 ))
       done
