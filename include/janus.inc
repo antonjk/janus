@@ -21,6 +21,12 @@ _JANUS_INC_SOURCED=1
 # NOTE: do not run under `set -u`; the vendored cprintf is not nounset-clean.
 ########################################################################################################################
 
+# Concurrency width used when a group is opened with a bare `--async` (no `=N`).
+# Defaults to "unbounded" but is env-overridable: a script or user can
+# `export JANUS_ASYNC=4` (or =1 to force sync) before the run to control every
+# bare-`--async` group at once.
+: "${JANUS_ASYNC:=unbounded}"
+
 # Dependencies (sourced by the transpiled script's prologue, but guard here too):
 #   trap.inc  -> trap_add, kill_descendant_processes
 #   temp.inc  -> temp_dir (per-PID folder)
@@ -72,13 +78,18 @@ _janus_record() {
 # ---------------------------------------------------------------------------------------------------------------------
 # Registry API
 # ---------------------------------------------------------------------------------------------------------------------
-
 janus-group() {
    _janus_init
-   local async="" header=""
+   # Concurrency resolution:
+   #   no --async      -> "1"            (sync; one step at a time)
+   #   --async         -> "$JANUS_ASYNC" (env-driven; defaults to "unbounded", but a
+   #                                       script/user can export JANUS_ASYNC to pick a
+   #                                       specific width, e.g. 4, or 1 to force sync)
+   #   --async=N        -> "N"            (explicit literal always wins)
+   local async="1" header=""
    while [[ $# -gt 0 ]]; do
       case "$1" in
-         --async)    async="unbounded"; shift ;;
+         --async)    async="${JANUS_ASYNC}"; shift ;;
          --async=*)  async="${1#--async=}"; shift ;;
          --)         shift; break ;;
          -*)         shift ;;              # ignore unknown flags for forward-compat

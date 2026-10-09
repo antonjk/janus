@@ -62,11 +62,15 @@ Groups nest; steps are leaves and never nest.
 .B #@ group [async[=N]]: <header>
 Open a group. Without
 .BR async ,
-children run sequentially. With
+children run sequentially. A bare
 .B async
-(optionally capped at
-.BR N )
-a maximal run of adjacent steps runs concurrently.
+runs them concurrently with the width taken from
+.B JANUS_ASYNC
+(default
+.BR unbounded );
+.B async=N
+fixes the concurrency at
+.BR N .
 .TP
 .B #@ step [id=X] [depends=a,b] [success=N] [fail=N] [ok=WORD] [err=WORD]: <header>
 Open a step. The lines until the matching
@@ -137,6 +141,11 @@ currently being waited on.
 #@ end
 .fi
 .SH ENVIRONMENT
+.TP
+.B JANUS_ASYNC
+Concurrency width used by a group opened with a bare
+.B async
+(default: unbounded). Set to a number to cap it, or to 1 to force sync.
 .TP
 .B JANUS_CONTEXT_SUCCESS
 Default trailing output lines shown on step success (default: 0).

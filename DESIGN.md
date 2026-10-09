@@ -67,7 +67,12 @@ is added by the transpiler.
 
 - Ends are **explicit**. Every `group` and `step` is closed by its own `#@ end`.
 - Groups **nest**. Steps are leaves and never nest.
-- `async` with no `=N` means unbounded concurrency within a batch; `async=N` caps it.
+- Concurrency of a group:
+  - no `async` → **sync** (one step at a time);
+  - `async` (bare) → concurrency comes from the `JANUS_ASYNC` environment variable
+    (default `unbounded`); a script or user can `export JANUS_ASYNC=4` (or `=1` to
+    force sync) to control every bare-`async` group at once;
+  - `async=N` → fixed concurrency `N` (an explicit literal always wins).
 - Per-step display overrides (all optional; fall back to global env defaults):
   - `success=<N>` / `fail=<N>` — context lines to show on success / failure
     (override `JANUS_CONTEXT_SUCCESS` / `JANUS_CONTEXT_FAIL`).
@@ -85,7 +90,8 @@ is added by the transpiler.
 A group processes its children **in registration order**. Within a group:
 
 - A **maximal run of adjacent steps** forms one **concurrent batch**. In an `async`
-  group the batch runs concurrently (bounded by `N`); in a sync group each batch is
+  group the batch runs concurrently (bare `async` → `JANUS_ASYNC`, default
+  `unbounded`; `async=N` → bounded by `N`); in a sync group each batch is
   effectively size 1 (sequential).
 - A **child group is a barrier**: the preceding batch must finish before the child
   group starts, and the child group must finish before the following batch starts.
@@ -149,13 +155,15 @@ janus-run /abs/path/script.sh [script-args...]
 |---------------------------------------------|----------------------------------------------------------|
 | `#@ group: T`                               | `janus-group "T"`                                      |
 | `#@ group async: T`                         | `janus-group --async "T"`                             |
-| `#@ group async=N: T`                       | `janus-group --async N "T"`                           |
+| `#@ group async=N: T`                       | `janus-group --async=N "T"`                           |
 | `#@ step: T` ... `#@ end`                   | `janus-step "T" <<STEP_BODY_<uid>` / body / `STEP_BODY_<uid>` |
 | `#@ step id=X depends=a,b: T` ... `#@ end`  | `janus-step --id X --depends a,b "T" <<STEP_BODY_<uid>` ... |
 | `#@ end` closing a group                    | `janus-group-end`                                     |
 
 Rules:
 
+- The transpiler emits the group's async spec verbatim; the **runtime** resolves it:
+  bare `--async` → `$JANUS_ASYNC` (default `unbounded`), `--async=N` → `N`, none → `1`.
 - Heredoc delimiter is **unquoted** (`<<STEP_BODY_<uid>`), so the body is **expanded
   at registration** in its lexical context (loop variables, `$(...)`). A literal `$`
   in a body must be escaped (`\$`).
