@@ -32,6 +32,6 @@ clean:
 	rm -rf dist
 	@echo "Cleaned dist/"
 
-# Run the engine test against the development tree.
+# Run the full test suite against the development tree.
 test:
-	@bash test/test-engine.sh
+	@bash test/run-all.sh
