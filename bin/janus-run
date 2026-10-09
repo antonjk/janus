@@ -29,7 +29,19 @@
 
 set -o pipefail
 
-JANUS_RUN_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# Resolve this script's real location, following symlinks, so janus-run finds the
+# repo's include/ even when invoked through a symlink (e.g. a ~/.dev/bin/janus dev
+# override). macOS bash has no `readlink -f`, so walk the symlink chain by hand.
+JANUS_RUN_SELF="${BASH_SOURCE[0]}"
+while [ -h "${JANUS_RUN_SELF}" ]; do
+   _dir="$(cd -P "$(dirname "${JANUS_RUN_SELF}")" && pwd)"
+   _target="$(readlink "${JANUS_RUN_SELF}")"
+   case "${_target}" in
+      /*) JANUS_RUN_SELF="${_target}" ;;          # absolute symlink target
+      *)  JANUS_RUN_SELF="${_dir}/${_target}" ;;  # relative to the link's dir
+   esac
+done
+JANUS_RUN_SELF="$(cd -P "$(dirname "${JANUS_RUN_SELF}")" && pwd)/$(basename "${JANUS_RUN_SELF}")"
 JANUS_ROOT="$(cd "$(dirname "${JANUS_RUN_SELF}")/.." && pwd)"
 JANUS_INCLUDE="${JANUS_ROOT}/include"
 

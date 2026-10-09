@@ -37,14 +37,14 @@ clean:
 test:
 	@bash test/run-all.sh
 
-# Build the bundle and symlink it into the dev-override dir ($(DEV_BIN), kept first
-# on PATH) as `janus`, shadowing any installed janus. Re-run after changes to pick up
-# a fresh build. Use `make dev-clean` to drop the override and fall back to the
-# installed janus.
-dev: build
+# Symlink the live source transpiler (bin/janus-run) into the dev-override dir
+# ($(DEV_BIN), kept first on PATH) as `janus`, shadowing any installed janus. Because
+# it links to the SOURCE (not the built bundle), edits to bin/janus-run and
+# include/*.inc are picked up immediately — no rebuild. `make dev-clean` removes it.
+dev:
 	@mkdir -p "$(DEV_BIN)"
-	@ln -sf "$(abspath $(DIST))" "$(DEV_BIN)/janus"
-	@echo "Dev janus linked: $(DEV_BIN)/janus -> $(abspath $(DIST))"
+	@ln -sf "$(abspath bin/janus-run)" "$(DEV_BIN)/janus"
+	@echo "Dev janus linked (live source): $(DEV_BIN)/janus -> $(abspath bin/janus-run)"
 	@case ":$$PATH:" in *":$(DEV_BIN):"*) ;; *) echo "WARNING: $(DEV_BIN) is not on PATH; add it (first) so the dev build is picked up." ;; esac
 
 dev-clean:
