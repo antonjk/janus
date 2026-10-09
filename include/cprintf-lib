@@ -58,12 +58,19 @@
 [[ "$0" != "${BASH_SOURCE[0]}" && -n "${__CPRINTF_INC_SOURCED__:-}" ]] && return
 [[ "$0" != "${BASH_SOURCE[0]}" ]] && __CPRINTF_INC_SOURCED__=1
 
-# Get script directory (handle symlinks)
-if [[ -L "${BASH_SOURCE[0]}" ]]; then
-    _CPRINTF_SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-else
-    _CPRINTF_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fi
+# Get script directory, following symlinks. `readlink -f` is GNU-only (and only on
+# newer macOS), so resolve the symlink chain by hand for portability (BSD/macOS).
+__cprintf_self="${BASH_SOURCE[0]}"
+while [[ -L "${__cprintf_self}" ]]; do
+    __cprintf_dir="$(cd -P "$(dirname "${__cprintf_self}")" && pwd)"
+    __cprintf_target="$(readlink "${__cprintf_self}")"
+    case "${__cprintf_target}" in
+        /*) __cprintf_self="${__cprintf_target}" ;;
+        *)  __cprintf_self="${__cprintf_dir}/${__cprintf_target}" ;;
+    esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${__cprintf_self}")" && pwd)"
+unset __cprintf_self __cprintf_dir __cprintf_target
 
 ##################################################################################
 # INCLUDES - Start
@@ -637,10 +644,9 @@ function cprintf() {
 [[ "$0" != "${BASH_SOURCE[0]}" ]] && return
 
 if [[ $# -eq 0 && ! -t 0 ]]; then
-    cprintf "$(cat)\n"
-#    while IFS= read -r line; do
-#        cprintf "${line}\n"
-#    done
+    while IFS= read -r line; do
+        cprintf "${line}\n"
+    done
     exit 0
 fi
 # Show help if no arguments or --help
