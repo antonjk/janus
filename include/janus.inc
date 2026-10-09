@@ -48,6 +48,20 @@ _janus_spool() {
    printf '%s/janus' "${base}"
 }
 
+# Detect the online CPU count portably (used to clamp "unbounded" concurrency).
+#   getconf _NPROCESSORS_ONLN  -> macOS and Linux
+#   nproc                      -> Linux / coreutils
+#   sysctl -n hw.ncpu          -> macOS / BSD
+# Falls back to 4 if none report a positive integer.
+_janus_ncpu() {
+   local n
+   n="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"
+   [[ "${n}" =~ ^[0-9]+$ ]] || n="$(nproc 2>/dev/null)"
+   [[ "${n}" =~ ^[0-9]+$ ]] || n="$(sysctl -n hw.ncpu 2>/dev/null)"
+   [[ "${n}" =~ ^[0-9]+$ && "${n}" -gt 0 ]] || n=4
+   printf '%s' "${n}"
+}
+
 _janus_init() {
    local spool; spool="$(_janus_spool)"
    [[ -d "${spool}" ]] && return 0
@@ -296,7 +310,7 @@ _janus_walk_node() {
 
 # Run a batch of step indices with the given concurrency.
 #   $1 = depth (of the containing group, for indentation)
-#   $2 = async spec ("" => sequential/size-1; "unbounded" => no cap; N => cap N)
+#   $2 = async spec ("" => sync; "unbounded" => min(batch, ncpu); N => cap N)
 #   $3.. = step indices into the _WT_* arrays
 #
 # Display model: steps are launched concurrently (bounded by cap), but reported
@@ -314,7 +328,13 @@ _janus_run_batch() {
    if [[ -z "${async}" ]]; then
       cap=1
    elif [[ "${async}" == "unbounded" ]]; then
+      # "unbounded" means "go as wide as sensible" — clamp to the CPU count so a
+      # large batch can't fork hundreds of processes and thrash the machine. An
+      # explicit async=N (below) is NOT clamped: if the user asks for a specific
+      # width, that is their call.
+      local ncpu; ncpu="$(_janus_ncpu)"
       cap=${#steps[@]}
+      (( cap > ncpu )) && cap=${ncpu}
    else
       cap="${async}"
       (( cap < 1 )) && cap=1

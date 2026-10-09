@@ -67,7 +67,8 @@ children run sequentially. A bare
 runs them concurrently with the width taken from
 .B JANUS_ASYNC
 (default
-.BR unbounded );
+.BR unbounded ,
+i.e. up to one process per CPU core);
 .B async=N
 fixes the concurrency at
 .BR N .
@@ -145,7 +146,10 @@ currently being waited on.
 .B JANUS_ASYNC
 Concurrency width used by a group opened with a bare
 .B async
-(default: unbounded). Set to a number to cap it, or to 1 to force sync.
+(default: unbounded, which is clamped to the online CPU-core count). Set to a
+number to use a fixed width, or to 1 to force sync. An explicit
+.B async=N
+in a directive is used as-is and is not clamped.
 .TP
 .B JANUS_CONTEXT_SUCCESS
 Default trailing output lines shown on step success (default: 0).

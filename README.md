@@ -108,8 +108,8 @@ closed by its own `#@ end`. Groups nest; steps are leaves.
 ```
 
 - **`async`** — without it, a group's steps run sequentially. A bare `async` runs
-  them concurrently with the width in `JANUS_ASYNC` (default `unbounded`; set it to
-  a number, or `1` to force sync); `async=N` fixes the concurrency at `N`.
+  them concurrently with the width in `JANUS_ASYNC` (default `unbounded`, i.e. up to
+  one process per CPU core; set it to a number, or `1` to force sync); `async=N` fixes the concurrency at `N`.
 - **Headers and bodies expand at registration time** — `$(...)`, `${var}`, and loop
   variables resolve in the lexical context where the directive appears, so a `#@ step`
   inside a `for` loop registers one step per iteration.
@@ -145,7 +145,7 @@ registers one step per pass with that pass's values baked in).
 
 | Variable                 | Purpose                                   | Default     |
 |--------------------------|-------------------------------------------|-------------|
-| `JANUS_ASYNC`            | Concurrency for a bare-`async` group      | `unbounded` |
+| `JANUS_ASYNC`            | Concurrency for a bare-`async` group (`unbounded` = up to CPU cores) | `unbounded` |
 | `JANUS_CONTEXT_SUCCESS`  | Default trailing lines on success         | `0`         |
 | `JANUS_CONTEXT_FAIL`     | Default trailing lines on failure         | `25`        |
 | `JANUS_OK_TEXT`          | Default success status word               | `OK`        |

@@ -70,8 +70,9 @@ is added by the transpiler.
 - Concurrency of a group:
   - no `async` → **sync** (one step at a time);
   - `async` (bare) → concurrency comes from the `JANUS_ASYNC` environment variable
-    (default `unbounded`); a script or user can `export JANUS_ASYNC=4` (or `=1` to
-    force sync) to control every bare-`async` group at once;
+    (default `unbounded`, which means up to one process per CPU core); a script or
+    user can `export JANUS_ASYNC=4` (or `=1` to force sync) to control every
+    bare-`async` group at once;
   - `async=N` → fixed concurrency `N` (an explicit literal always wins).
 - Per-step display overrides (all optional; fall back to global env defaults):
   - `success=<N>` / `fail=<N>` — context lines to show on success / failure
@@ -90,8 +91,8 @@ is added by the transpiler.
 A group processes its children **in registration order**. Within a group:
 
 - A **maximal run of adjacent steps** forms one **concurrent batch**. In an `async`
-  group the batch runs concurrently (bare `async` → `JANUS_ASYNC`, default
-  `unbounded`; `async=N` → bounded by `N`); in a sync group each batch is
+  group the batch runs concurrently (bare `async` → `JANUS_ASYNC`, default `unbounded` = up to CPU-core count;
+  `async=N` → bounded by `N`); in a sync group each batch is
   effectively size 1 (sequential).
 - A **child group is a barrier**: the preceding batch must finish before the child
   group starts, and the child group must finish before the following batch starts.
@@ -280,7 +281,7 @@ walk(group):
   run_batch(batch)
 
 run_batch(steps):
-  if group is sync: cap = 1 else cap = N (or unbounded)
+  if group is sync: cap = 1; unbounded: cap = min(batch, ncpu); else cap = N
   launch up to `cap` step bodies as background children, capturing to step.<uid>.out
   as each finishes, show status; keep launching until all done
   wait for all in the batch before returning
