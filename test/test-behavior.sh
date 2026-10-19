@@ -74,4 +74,40 @@ assert_contains "pipe step aa ran with per-iteration value" "${out}" "ran aa"
 assert_contains "pipe step cc ran with per-iteration value" "${out}" "ran cc"
 assert_contains "pipe step can call script function"        "${out}" "tag:bb"
 
+# --- #@ exec: ordered, silent-on-success, runs once, surfaces failures ------------
+cat > "${TMP}/exec.sh" <<'EOF'
+#!/usr/bin/env janus-run
+#@ group: Sync
+    #@ step: meta
+    echo SYNC_RAN
+    #@ end
+#@ end
+#@ exec
+echo EXEC_RAN
+#@ end
+EOF
+out="$(run_janus 20 "${TMP}/exec.sh" | strip_ansi)"
+assert_contains "exec body runs"                      "${out}" "EXEC_RAN"
+# runs exactly once (not doubled by a stray janus-exec)
+n_exec="$(printf '%s\n' "${out}" | grep -c 'EXEC_RAN' || true)"
+assert_eq "exec body runs exactly once" "1" "${n_exec}"
+# silent on success: the exec body line carries no status box of its own
+exec_render="$(printf '%s\n' "${out}" | grep 'EXEC_RAN')"
+assert_eq "exec line is the bare body, no status box" "EXEC_RAN" "${exec_render}"
+# ordering: the Sync group renders before the exec body
+sync_line="$(printf '%s\n' "${out}" | grep -n 'Sync' | head -1 | cut -d: -f1)"
+exec_line="$(printf '%s\n' "${out}" | grep -n 'EXEC_RAN' | head -1 | cut -d: -f1)"
+assert_lt "sync group runs before exec block" "${sync_line}" "${exec_line}"
+
+# failure inside #@ exec still surfaces its context
+cat > "${TMP}/execfail.sh" <<'EOF'
+#!/usr/bin/env janus-run
+#@ exec
+echo BOOM_CONTEXT; false
+#@ end
+EOF
+# This run exits non-zero by design; don't let errexit abort the test.
+out="$(run_janus 20 "${TMP}/execfail.sh" | strip_ansi)" || true
+assert_contains "exec failure shows context" "${out}" "BOOM_CONTEXT"
+
 summary

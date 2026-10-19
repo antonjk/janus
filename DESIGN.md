@@ -63,10 +63,20 @@ is added by the transpiler.
 #@ step [id=<id>] [depends=<id>,...] [success=<N>] [fail=<N>] [ok=<word>] [err=<word>]: <header text>
 <body ...>
 #@ end
+
+#@ exec
+<body ...>
+#@ end
 ```
 
-- Ends are **explicit**. Every `group` and `step` is closed by its own `#@ end`.
-- Groups **nest**. Steps are leaves and never nest.
+- Ends are **explicit**. Every `group`, `step`, and `exec` is closed by its own `#@ end`.
+- Groups **nest**. Steps and `exec` blocks are leaves and never nest.
+- `#@ exec` is a **headerless step**: an ordered-but-silent leaf. It runs in tree
+  order (so it obeys group barriers) exactly like a step, but prints no header or
+  status line on success. On failure it still shows the failure context. It takes
+  **no header and no attributes**. Use it to sequence plain commands after a titled
+  group without hand-writing a `janus-exec` call (which would double-run the tree,
+  since the transpiler already appends its own `janus-exec` epilogue).
 - Concurrency of a group:
   - no `async` → **sync** (one step at a time);
   - `async` (bare) → concurrency comes from the `JANUS_ASYNC` environment variable
@@ -159,6 +169,7 @@ janus-run /abs/path/script.sh [script-args...]
 | `#@ group async=N: T`                       | `janus-group --async=N "T"`                           |
 | `#@ step: T` ... `#@ end`                   | `janus-step "T" <<STEP_BODY_<uid>` / body / `STEP_BODY_<uid>` |
 | `#@ step id=X depends=a,b: T` ... `#@ end`  | `janus-step --id X --depends a,b "T" <<STEP_BODY_<uid>` ... |
+| `#@ exec` ... `#@ end`                       | `janus-step --quiet "" <<STEP_BODY_<uid>` / body / `STEP_BODY_<uid>` (headerless) |
 | `#@ end` closing a group                    | `janus-group-end`                                     |
 
 Rules:

@@ -95,8 +95,9 @@ Arguments after the script path are forwarded to the script as its own `$@`.
 
 ## Annotation grammar
 
-Directives are shell comments beginning with `#@`. Every `group` and `step` is
-closed by its own `#@ end`. Groups nest; steps are leaves.
+Directives are shell comments beginning with `#@`. Every `group`, `step`, and
+`exec` block is closed by its own `#@ end`. Groups nest; steps and `exec` blocks are
+leaves.
 
 ```
 #@ group [async[=N]]: <header>
@@ -105,11 +106,21 @@ closed by its own `#@ end`. Groups nest; steps are leaves.
 #@ step [id=X] [depends=a,b] [success=N] [fail=N] [ok=WORD] [err=WORD]: <header>
 <body ...>
 #@ end
+
+#@ exec
+<body ...>
+#@ end
 ```
 
 - **`async`** — without it, a group's steps run sequentially. A bare `async` runs
   them concurrently with the width in `JANUS_ASYNC` (default `unbounded`, i.e. up to
   one process per CPU core; set it to a number, or `1` to force sync); `async=N` fixes the concurrency at `N`.
+- **`#@ exec`** — a headerless block that runs in tree order (so it respects group
+  barriers) but prints no header or status line, and does not capture its output: the
+  body writes straight to the terminal. Use it to sequence a plain command — or
+  another program with its own UI — after a titled group, without a hand-written
+  `janus-exec` call. It takes no header and no attributes. On failure the run exits
+  non-zero like any failed step.
 - **Headers and bodies expand at registration time** — `$(...)`, `${var}`, and loop
   variables resolve in the lexical context where the directive appears, so a `#@ step`
   inside a `for` loop registers one step per iteration.

@@ -7,8 +7,10 @@ _JANUS_INC_SOURCED=1
 # Registry API (used by transpiled scripts):
 #   janus-group [--async[=N]] "<header>"   open a group (branch)
 #   janus-group-end                        close the current group
-#   janus-step  [--id X] [--depends a,b] "<header>" <<DELIM ... DELIM
+#   janus-step  [--id X] [--depends a,b] [--quiet] "<header>" <<DELIM ... DELIM
 #                                            register a leaf; body read from stdin (NOT executed yet)
+#                                            --quiet => headerless (#@ exec): no status line on
+#                                            success, failure context still shown
 #   janus-exec                             run the registered tree
 #
 # Model (see DESIGN.md s4): a group runs children in registration order; a maximal run
@@ -129,7 +131,7 @@ janus-group-end() {
 janus-step() {
    _janus_init
    local id="" depends="" header=""
-   local succ="" fail="" ok="" err=""
+   local succ="" fail="" ok="" err="" quiet=""
    while [[ $# -gt 0 ]]; do
       case "$1" in
          --id)        id="$2"; shift 2 ;;
@@ -144,6 +146,7 @@ janus-step() {
          --ok=*)      ok="${1#--ok=}"; shift ;;
          --err)       err="$2"; shift 2 ;;
          --err=*)     err="${1#--err=}"; shift ;;
+         --quiet)     quiet="1"; shift ;;
          --)          shift; break ;;
          -*)          shift ;;
          *)           break ;;
@@ -173,7 +176,7 @@ ${body}
    printf '%s\n' "${body}" >"${spool}/step.${uid}.body"
    # Meta is a ';'-separated kv list; empty values mean "use the global default".
    # The function name travels in meta as fn=... so the engine knows what to call.
-   local meta="depends=${depends};success=${succ};fail=${fail};ok=${ok};err=${err};fn=${fn}"
+   local meta="depends=${depends};success=${succ};fail=${fail};ok=${ok};err=${err};quiet=${quiet};fn=${fn}"
    _janus_record "STEP|${_JANUS_DEPTH}|${uid}|${meta}|${header}"
 }
 
@@ -228,6 +231,9 @@ janus-exec() {
    local _k
    for (( _k=0; _k<n; _k++ )); do
       [[ "${_WT_TYPE[$_k]}" == "STEP" ]] || continue
+      # Quiet steps print no header/status line, so they must not influence the
+      # shared alignment columns.
+      [[ "$(_janus_meta_get "${_WT_META[$_k]}" quiet)" == "1" ]] && continue
       local _indent_w=$(( ( ${_WT_DEPTH[$_k]} + 1 ) * JANUS_INDENT ))
       local _w=$(( _indent_w + ${#_WT_HEADER[$_k]} ))
       (( _w > _WT_MAXHDR )) && _WT_MAXHDR=${_w}
@@ -343,6 +349,29 @@ _janus_run_batch() {
    local spool; spool="$(_janus_spool)"
    local rc=0
    local total=${#steps[@]}
+
+   # Quiet (#@ exec) steps run INLINE with inherited stdout/stderr: no capture, no
+   # spinner, no status line. This lets an exec block whose body is itself an
+   # interactive/annotated program (e.g. another janus script) render its own output
+   # live. They are ordered leaves, so running them inline here preserves tree order.
+   # A quiet step is never mixed into a concurrent batch of titled steps: the
+   # transpiler only emits them standalone, so handle them one-at-a-time up front.
+   if [[ "$(_janus_meta_get "${_WT_META[${steps[0]}]}" quiet)" == "1" ]]; then
+      local qi
+      for qi in "${steps[@]}"; do
+         local qfn; qfn="$(_janus_meta_get "${_WT_META[$qi]}" fn)"
+         local qbody="${spool}/step.${_WT_ID[$qi]}.body"
+         if declare -F "${qfn}" >/dev/null 2>&1; then
+            "${qfn}"
+         else
+            # Registered inside a subshell (function not visible): source the body in
+            # a forked subshell so it still inherits the script context AND the tty.
+            ( source "${qbody}" )
+         fi
+         (( $? != 0 )) && rc=1
+      done
+      return ${rc}
+   fi
 
    # PID per batch position (parallel to `steps`); empty until launched.
    local -a step_pid=()

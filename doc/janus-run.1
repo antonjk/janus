@@ -52,12 +52,15 @@ Display help and exit.
 Directives are shell comments beginning with
 .BR #@ .
 Every
-.B group
+.BR group ,
+.BR step ,
 and
-.B step
-is closed by its own
+.B exec
+block is closed by its own
 .BR "#@ end" .
-Groups nest; steps are leaves and never nest.
+Groups nest; steps and
+.B exec
+blocks are leaves and never nest.
 .TP
 .B #@ group [async[=N]]: <header>
 Open a group. Without
@@ -78,8 +81,19 @@ Open a step. The lines until the matching
 .B #@ end
 are the step body.
 .TP
+.B #@ exec
+Open a headerless block. It runs in tree order (respecting group barriers) like a
+step, but prints no header or status line and does not capture its output \(em the
+body writes straight to the terminal, so an
+.B exec
+block whose body has its own UI (e.g. another janus script) renders live. Use it to
+sequence a plain command after a titled group without a hand\-written
+.B janus-exec
+call. It takes no header and no attributes; a failure makes the run exit non\-zero
+like any failed step.
+.TP
 .B #@ end
-Close the most recent open step or group.
+Close the most recent open step, exec block, or group.
 .PP
 Header text and step bodies are
 .B expanded at registration time

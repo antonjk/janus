@@ -22,6 +22,9 @@
 #   #@ step [id=X] [depends=a,b]: T   -> janus-step [--id X] [--depends a,b] "T" <<DELIM
 #   <body...>                             <body...>
 #   #@ end  (closing a step)              DELIM
+#   #@ exec                          -> janus-step --quiet "" <<DELIM   (headerless)
+#   <body...>                             <body...>
+#   #@ end  (closing an exec)             DELIM
 #   #@ end  (closing a group)        -> janus-group-end
 #
 # Heredoc delimiters are UNQUOTED (body expands at registration) and UNIQUE per step.
@@ -162,6 +165,22 @@ transpile() {
                   printf 'janus-group %s\n' "$(_wq "${header}")"
                fi
                stack+=("group")
+               ;;
+            exec)
+               # exec ... end  -> a HEADERLESS, status-less step. Runs as a leaf in
+               # tree order (so it obeys group barriers) but prints no header/status
+               # line on success. Failures still show their context. This is the
+               # ordered-but-silent block: use it to sequence plain commands after a
+               # titled group without a hand-written janus-exec.
+               uid=$(( uid + 1 ))
+               local delim="JANUS_STEP_${uid}"
+               printf 'janus-step --quiet %s <<%s\n' "$(_wq "")" "${delim}"
+               stack+=("step:${delim}")
+               ;;
+            exec\ *|exec:*)
+               # `#@ exec` takes no header or attributes; reject extra text so typos
+               # (e.g. `#@ exec: foo`) fail loudly rather than silently misparsing.
+               die "'#@ exec' takes no header or attributes in ${src}: ${directive}"
                ;;
             step*)
                # step [id=X] [depends=a,b] [success=N] [fail=N] [ok=WORD] [err=WORD]: header

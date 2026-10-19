@@ -33,6 +33,33 @@ assert_contains "runtime sourced in prologue"             "${emit}" 'source'
 assert_contains "epilogue runs the tree"                  "${emit}" 'janus-exec'
 assert_contains "for-loop structure preserved"            "${emit}" 'for f in x y; do'
 
+# --- #@ exec -> headerless (quiet) step -------------------------------------------
+cat > "${TMP}/e.sh" <<'EOF'
+#!/usr/bin/env janus-run
+#@ group: Sync
+    #@ step: meta
+    echo synced
+    #@ end
+#@ end
+#@ exec
+echo ran-exec
+#@ end
+EOF
+eemit="$("${JANUS_RUN}" --emit "${TMP}/e.sh")"
+assert_contains "exec -> janus-step --quiet with empty header" "${eemit}" 'janus-step --quiet ""'
+assert_contains "exec body preserved"                          "${eemit}" 'echo ran-exec'
+assert_not_contains "exec adds no second janus-exec call inline" "$(printf '%s\n' "${eemit}" | grep -c '^janus-exec$')" "2"
+
+# exec takes no header/attrs: `#@ exec: foo` must be rejected
+cat > "${TMP}/ebad.sh" <<'EOF'
+#!/usr/bin/env janus-run
+#@ exec: nope
+echo x
+#@ end
+EOF
+if "${JANUS_RUN}" --emit "${TMP}/ebad.sh" >/dev/null 2>&1
+then fail "exec with header should be rejected"; else pass "exec with header rejected"; fi
+
 # unique heredoc delimiters per step (no collision)
 d1="$(printf '%s\n' "${emit}" | grep -oE '<<JANUS_STEP_[0-9]+' | sed -n 1p)"
 d2="$(printf '%s\n' "${emit}" | grep -oE '<<JANUS_STEP_[0-9]+' | sed -n 2p)"
